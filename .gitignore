@@ -1,0 +1,18 @@
+# Executables
+*.exe
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# PyInstaller build files
+build/
+*.spec
+
+# DPAPI secrets vault (local only, do not commit)
+*.secrets
+
+# Temporary archives
+*.zip
+*.md
+!README.md
