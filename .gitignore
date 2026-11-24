@@ -1,18 +1,48 @@
-# Executables
-*.exe
-
-# Python bytecode
+# Python caches and tooling
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+.tox/
 
-# PyInstaller build files
+# Environments
+.venv/
+venv/
+env/
+
+# Packaging and executable builds
 build/
+dist/
+*.egg-info/
 *.spec
+*.exe
+*.sha256
 
-# DPAPI secrets vault (local only, do not commit)
+# ZIPMarkdown generated outputs and protected vaults
 *.secrets
-
-# Temporary archives
+*.secrets.tmp
 *.zip
-*.md
-!README.md
+*.tmp
+*.bak
+
+# Local/private credentials (safe templates remain allowed)
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+!.env.dist
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+
+# Editors and OS artifacts
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

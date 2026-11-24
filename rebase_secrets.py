@@ -1,63 +1,49 @@
 #!/usr/bin/env python3
-"""Rebase a local MD Toolkit secrets vault onto an AI-provided Markdown or ZIP."""
-
+"""Apply a ZIPMarkdown vault conservatively to AI-edited Markdown or ZIP."""
 from __future__ import annotations
 
 import argparse
 import zipfile
 from pathlib import Path
 
+from archive_safety import DEFAULT_LIMITS, SecurityLimits
 from local_secrets import secrets_path_for
-from secrets_rebase import rebase_markdown_file, rebase_zip_file
+from secrets_rebase import RebaseReport, rebase_markdown_file, rebase_zip_file
+
+
+def run_rebase(source: Path, vault: Path, output: Path | None = None, *, limits: SecurityLimits = DEFAULT_LIMITS) -> tuple[RebaseReport, Path]:
+    if not source.is_file():
+        raise FileNotFoundError(f"input does not exist: {source}")
+    if not vault.is_file():
+        raise FileNotFoundError(f"vault does not exist: {vault}")
+    suffix = source.suffix.casefold()
+    if suffix not in {".md", ".zip"}:
+        raise ValueError("input must be a .md or .zip file")
+    destination = output or source.with_name(source.stem + "_rebased.zip")
+    report = (
+        rebase_markdown_file(source, destination, vault, limits=limits)
+        if suffix == ".md" else rebase_zip_file(source, destination, vault, limits=limits)
+    )
+    return report, destination
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Aplica de forma conservadora un vault local cifrado a un Markdown o ZIP "
-            "entregado por una IA."
-        )
-    )
-    parser.add_argument("input", type=Path, help="Markdown o ZIP nuevo de la IA")
-    parser.add_argument(
-        "--secrets",
-        type=Path,
-        help="Archivo .secrets local (por defecto, se busca junto a la entrada)",
-    )
-    parser.add_argument(
-        "-o",
-        "--output",
-        type=Path,
-        help="ZIP de salida (por defecto, <nombre>_rebased.zip)",
-    )
+    parser = argparse.ArgumentParser(description="Conservatively apply a local ZIPMarkdown vault.")
+    parser.add_argument("input", type=Path)
+    parser.add_argument("--secrets", type=Path)
+    parser.add_argument("-o", "--output", type=Path)
     args = parser.parse_args()
-
-    source = args.input
-    if not source.is_file():
-        parser.error(f"no existe el archivo: {source}")
-    suffix = source.suffix.casefold()
-    if suffix not in {".md", ".zip"}:
-        parser.error("la entrada debe ser un archivo .md o .zip")
-    vault = args.secrets or secrets_path_for(source)
-    if not vault.is_file():
-        parser.error(f"no se encontró el vault local: {vault} (usa --secrets para seleccionarlo)")
-    output = args.output or source.with_name(source.stem + "_rebased.zip")
-
+    vault = args.secrets or secrets_path_for(args.input)
     try:
-        if suffix == ".md":
-            report = rebase_markdown_file(source, output, vault)
-        else:
-            report = rebase_zip_file(source, output, vault)
+        report, output = run_rebase(args.input, vault, args.output)
     except (OSError, UnicodeError, ValueError, RuntimeError, zipfile.BadZipFile) as error:
-        parser.error(f"no se pudo rebasar el vault: {error}")
-
+        parser.error(f"rebase failed: {error}")
     print(
-        f"Creado: {output} · secretos aplicados: {report.values_applied} · "
-        f"sin coincidencia segura: {report.values_unmatched} · "
-        f"archivos sensibles recuperados: {report.sensitive_files_added}."
+        f"Created: {output} · secrets restored: {report.values_applied} · "
+        f"unmatched: {report.values_unmatched} · protected files added: {report.protected_files_added}."
     )
-    if report.values_unmatched:
-        print("Aviso: no se modificaron valores ambiguos; la conversión se completó igualmente.")
+    for warning in report.warnings:
+        print(f"Warning: {warning}")
     return 0
 
 

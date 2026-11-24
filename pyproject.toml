@@ -1,0 +1,67 @@
+[build-system]
+requires = ["setuptools>=75,<82", "wheel>=0.44,<1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zipmarkdown"
+version = "0.1.0"
+description = "Secure, local project/ZIP to AI-friendly Markdown round trips"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Javier Stampa Garcia" }]
+keywords = ["markdown", "zip", "ai", "secrets", "dpapi"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+]
+dependencies = [
+  "pypdf>=5.1,<7",
+  "Pillow>=10.4,<13",
+  "pystray>=0.19.5,<1",
+  "pathspec>=0.12.1,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "build>=1.2.2,<2",
+  "PyInstaller>=6.11,<7",
+  "pytest>=8.3,<9",
+  "pytest-cov>=6,<8",
+  "ruff>=0.8,<1",
+]
+
+[project.scripts]
+zipmarkdown = "zipmarkdown_cli:main"
+zipmarkdown-gui = "zip_markdown_app:main"
+
+[tool.setuptools]
+py-modules = [
+  "archive_safety", "atomic_utils", "filename_recovery", "gitignore_support",
+  "local_secrets", "markdown_a_zip", "pdf_extractor", "rebase_secrets",
+  "secret_filter", "secrets_rebase", "zip_a_markdown", "zip_markdown_app",
+  "zipmarkdown_cli",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+  "integration: end-to-end integration tests",
+  "windows: Windows-only DPAPI and GUI tests",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+exclude = ["build", "dist"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "W"]

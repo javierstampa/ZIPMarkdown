@@ -1,60 +1,59 @@
-"""Extractor de texto y utilidades para archivos PDF."""
-
+"""Bounded PDF text extraction for ZIPMarkdown."""
 from __future__ import annotations
 
 import io
 import re
 import zlib
 
+from archive_safety import DEFAULT_LIMITS, ArchiveSecurityError, SecurityLimits
 
-def extract_pdf_text(data: bytes) -> str | None:
-    """Extrae texto legible de un binario PDF. Devuelve None si falla la extracción."""
-    # 1. Intentar con pypdf para máxima fidelidad
+
+def extract_pdf_text(data: bytes, *, limits: SecurityLimits = DEFAULT_LIMITS) -> str | None:
+    if len(data) > limits.max_file_size:
+        raise ArchiveSecurityError("PDF exceeds the configured size limit")
     try:
         import pypdf
-
-        reader = pypdf.PdfReader(io.BytesIO(data))
+        reader = pypdf.PdfReader(io.BytesIO(data), strict=False)
+        page_count = len(reader.pages)
+        if page_count > limits.max_pdf_pages:
+            raise ArchiveSecurityError(
+                f"PDF has {page_count} pages; limit is {limits.max_pdf_pages}"
+            )
         pages_text: list[str] = []
-        for idx, page in enumerate(reader.pages, start=1):
+        for index, page in enumerate(reader.pages, start=1):
             text = (page.extract_text() or "").strip()
             if text:
-                if len(reader.pages) > 1:
-                    pages_text.append(f"--- Página {idx} ---\n{text}")
-                else:
-                    pages_text.append(text)
-        if pages_text:
-            return "\n\n".join(pages_text)
-        return "[Documento PDF sin texto extraíble / compuesto por imágenes escaneadas]"
+                pages_text.append(f"--- Page {index} ---\n{text}" if page_count > 1 else text)
+        return "\n\n".join(pages_text) if pages_text else "[PDF document contains no extractable text]"
+    except ArchiveSecurityError:
+        raise
     except Exception:
-        pass
-
-    # 2. Fallback sin dependencias externas usando zlib y regex
-    return _fallback_extract_pdf_text(data)
+        return _fallback_extract_pdf_text(data, limits=limits)
 
 
-def _fallback_extract_pdf_text(data: bytes) -> str | None:
-    """Extractor básico sin dependencias para PDFs simples."""
+def _fallback_extract_pdf_text(data: bytes, *, limits: SecurityLimits = DEFAULT_LIMITS) -> str | None:
+    # A conservative page-object estimate keeps the dependency-free fallback bounded.
+    page_count = len(re.findall(rb"/Type\s*/Page\b", data))
+    if page_count > limits.max_pdf_pages:
+        raise ArchiveSecurityError(f"PDF has more than {limits.max_pdf_pages} pages")
     try:
         streams = re.findall(rb"stream[\r\n]+(.*?)[\r\n]+endstream", data, re.DOTALL)
         extracted: list[str] = []
-        for s in streams:
-            decompressed = None
+        total_decompressed = 0
+        for stream in streams:
             try:
-                decompressed = zlib.decompress(s)
+                decompressed = zlib.decompress(stream)
             except Exception:
-                if b"BT" in s and b"ET" in s:
-                    decompressed = s
-            if decompressed:
-                matches = re.findall(rb"\((.*?)\)\s*Tj", decompressed)
-                for m in matches:
-                    try:
-                        t = m.decode("utf-8", errors="ignore").strip()
-                        if t:
-                            extracted.append(t)
-                    except Exception:
-                        pass
-        if extracted:
-            return "\n".join(extracted)
+                decompressed = stream if b"BT" in stream and b"ET" in stream else b""
+            total_decompressed += len(decompressed)
+            if total_decompressed > limits.max_file_size:
+                raise ArchiveSecurityError("PDF decompressed content exceeds the configured limit")
+            for match in re.findall(rb"\((.*?)\)\s*Tj", decompressed):
+                text = match.decode("utf-8", errors="ignore").strip()
+                if text:
+                    extracted.append(text)
+        return "\n".join(extracted) if extracted else None
+    except ArchiveSecurityError:
+        raise
     except Exception:
-        pass
-    return None
+        return None

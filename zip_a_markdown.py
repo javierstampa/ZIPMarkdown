@@ -1,63 +1,36 @@
 #!/usr/bin/env python3
-"""Convierte los archivos de texto de un ZIP en un único documento Markdown."""
-
+"""Export a folder or ZIP to AI-friendly Markdown with local reversible protection."""
 from __future__ import annotations
 
 import argparse
 import base64
 import os
 import zipfile
-from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
-from filename_recovery import recover_names_from_includes
-from local_secrets import save_secrets, secrets_path_for
-from pdf_extractor import extract_pdf_text
-from secret_filter import (
-    is_generated_or_dependency_path,
-    is_sensitive_path,
-    redact_secret_values,
+from archive_safety import (
+    DEFAULT_LIMITS, ArchiveSecurityError, SecurityLimits, read_zip_entry,
+    validate_archive_name, validate_project_file, validate_zip_infos,
 )
-
+from atomic_utils import atomic_write_text
+from filename_recovery import recover_names_from_includes
+from gitignore_support import GitIgnoreMatcher
+from local_secrets import (
+    VaultBackend, VaultUnavailableError, payload_requires_vault, save_secrets, secrets_path_for,
+)
+from pdf_extractor import extract_pdf_text
+from secret_filter import FilterReport, is_generated_or_dependency_path, is_sensitive_path, redact_secret_values
 
 LANGUAGES = {
-    ".c": "c",
-    ".cc": "cpp",
-    ".cpp": "cpp",
-    ".cs": "csharp",
-    ".css": "css",
-    ".csv": "csv",
-    ".dart": "dart",
-    ".go": "go",
-    ".h": "c",
-    ".hpp": "cpp",
-    ".html": "html",
-    ".ini": "ini",
-    ".java": "java",
-    ".js": "javascript",
-    ".json": "json",
-    ".jsx": "jsx",
-    ".kt": "kotlin",
-    ".lua": "lua",
-    ".md": "markdown",
-    ".pdf": "text",
-    ".php": "php",
-    ".py": "python",
-    ".rb": "ruby",
-    ".rs": "rust",
-    ".scss": "scss",
-    ".sh": "bash",
-    ".sql": "sql",
-    ".swift": "swift",
-    ".toml": "toml",
-    ".ts": "typescript",
-    ".tsx": "tsx",
-    ".txt": "text",
-    ".xml": "xml",
-    ".yaml": "yaml",
-    ".yml": "yaml",
+    ".c": "c", ".cc": "cpp", ".cpp": "cpp", ".cs": "csharp", ".css": "css", ".csv": "csv",
+    ".dart": "dart", ".go": "go", ".h": "c", ".hpp": "cpp", ".html": "html", ".ini": "ini",
+    ".java": "java", ".js": "javascript", ".json": "json", ".jsx": "jsx", ".kt": "kotlin",
+    ".lua": "lua", ".md": "markdown", ".pdf": "text", ".php": "php", ".py": "python",
+    ".rb": "ruby", ".rs": "rust", ".scss": "scss", ".sh": "bash", ".sql": "sql",
+    ".swift": "swift", ".toml": "toml", ".ts": "typescript", ".tsx": "tsx", ".txt": "text",
+    ".xml": "xml", ".yaml": "yaml", ".yml": "yaml",
 }
 
 
@@ -66,6 +39,10 @@ class ProtectionStats:
     sensitive_files_skipped: int = 0
     generated_files_skipped: int = 0
     values_redacted: int = 0
+    binary_files_preserved: int = 0
+    gitignored_files_skipped: int = 0
+    filtering: FilterReport = field(default_factory=FilterReport)
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -75,7 +52,13 @@ class ConversionReport:
     sensitive_files_skipped: int
     generated_files_skipped: int
     values_redacted: int
-    secrets_file: Path
+    secrets_file: Path | None
+    binary_files_preserved: int = 0
+    high_confidence_detections: int = 0
+    contextual_detections: int = 0
+    files_affected: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
+    gitignored_files_skipped: int = 0
 
 
 @dataclass
@@ -84,10 +67,11 @@ class SecretCapture:
     bindings: list[dict[str, str]]
     redacted_files: list[dict[str, str]]
     sensitive_files: list[dict[str, str]]
+    binary_files: list[dict[str, str]]
 
     @classmethod
-    def create(cls) -> SecretCapture:
-        return cls({}, [], [], [])
+    def create(cls) -> "SecretCapture":
+        return cls({}, [], [], [], [])
 
     def payload(self) -> dict[str, Any]:
         return {
@@ -96,71 +80,95 @@ class SecretCapture:
             "bindings": self.bindings,
             "redacted_files": self.redacted_files,
             "sensitive_files": self.sensitive_files,
+            "binary_files": self.binary_files,
         }
 
 
-def capture_sensitive_bindings(raw: bytes, name: str, capture: SecretCapture) -> None:
-    """Index recognizable assignments inside an omitted sensitive text file."""
-    text = decode_text(raw)
-    if text is not None:
-        redact_secret_values(
-            text,
-            secret_values=capture.redactions,
-            secret_bindings=capture.bindings,
-            source_path=name,
-        )
-
-
 def decode_text(data: bytes) -> str | None:
-    """Decode common text encodings; return None for data that looks binary."""
     if b"\x00" in data and not data.startswith((b"\xff\xfe", b"\xfe\xff")):
         return None
-
-    encodings = ("utf-8-sig", "utf-16")
-    for encoding in encodings:
+    for encoding in ("utf-8-sig", "utf-16"):
         try:
             return data.decode(encoding)
         except (UnicodeDecodeError, UnicodeError):
-            continue
-
+            pass
     try:
         text = data.decode("cp1252")
     except UnicodeDecodeError:
         return None
-    if any(ord(char) < 32 and char not in "\t\n\r\f" for char in text):
-        return None
-    return text
+    return None if any(ord(char) < 32 and char not in "\t\n\r\f" for char in text) else text
 
 
 def safe_label(name: str) -> str:
-    """Keep archive paths on one Markdown heading line."""
     return name.replace("\r", " ").replace("\n", " ").replace("`", "\\`")
 
 
 def fence_for(content: str) -> str:
-    # Count every run, including runs at the start/end of a line.
-    longest = 0
-    current = 0
+    longest = current = 0
     for char in content:
         current = current + 1 if char == "`" else 0
         longest = max(longest, current)
     return "`" * max(3, longest + 1)
 
 
-def convert(zip_path: Path, output_path: Path) -> ConversionReport:
-    protection = ProtectionStats()
-    secrets = SecretCapture.create()
-    files, skipped_binary = read_zip_text_files(
-        zip_path, protection_stats=protection, secret_capture=secrets
+def _encoded_file(name: str, raw: bytes) -> dict[str, str]:
+    return {"name": name, "bytes": base64.b64encode(raw).decode("ascii")}
+
+
+def capture_sensitive_bindings(raw: bytes, name: str, capture: SecretCapture, report: FilterReport) -> None:
+    text = decode_text(raw)
+    if text is not None:
+        redact_secret_values(
+            text, secret_values=capture.redactions, secret_bindings=capture.bindings,
+            source_path=name, report=report,
+        )
+
+
+def _process_file(
+    name: str,
+    raw: bytes,
+    *,
+    protection: ProtectionStats,
+    capture: SecretCapture,
+    limits: SecurityLimits,
+) -> tuple[str, str] | None:
+    validate_archive_name(name, limits=limits)
+    if is_generated_or_dependency_path(name):
+        protection.generated_files_skipped += 1
+        return None
+    if is_sensitive_path(name):
+        capture_sensitive_bindings(raw, name, capture, protection.filtering)
+        capture.sensitive_files.append(_encoded_file(name, raw))
+        protection.sensitive_files_skipped += 1
+        return None
+    if name.casefold().endswith(".pdf"):
+        text = extract_pdf_text(raw, limits=limits)
+        if text is None:
+            capture.binary_files.append(_encoded_file(name, raw))
+            protection.binary_files_preserved += 1
+            return None
+        original = text
+        text, count = redact_secret_values(
+            text, secret_values=capture.redactions, secret_bindings=capture.bindings,
+            source_path=name, report=protection.filtering,
+        )
+        capture.redacted_files.append({"name": name, "text": original, "bytes": base64.b64encode(raw).decode("ascii")})
+        protection.values_redacted += count
+        return name, text
+    text = decode_text(raw)
+    if text is None:
+        capture.binary_files.append(_encoded_file(name, raw))
+        protection.binary_files_preserved += 1
+        return None
+    original = text
+    text, count = redact_secret_values(
+        text, secret_values=capture.redactions, secret_bindings=capture.bindings,
+        source_path=name, report=protection.filtering,
     )
-    return write_markdown(
-        zip_path.name,
-        files,
-        skipped_binary,
-        output_path,
-        protection_stats=protection,
-        secret_capture=secrets,
-    )
+    if count or raw != original.encode("utf-8"):
+        capture.redacted_files.append({"name": name, "text": original, "bytes": base64.b64encode(raw).decode("ascii")})
+    protection.values_redacted += count
+    return name, text
 
 
 def read_zip_text_files(
@@ -168,94 +176,68 @@ def read_zip_text_files(
     *,
     protection_stats: ProtectionStats | None = None,
     secret_capture: SecretCapture | None = None,
+    limits: SecurityLimits = DEFAULT_LIMITS,
 ) -> tuple[list[tuple[str, str]], int]:
+    protection = protection_stats or ProtectionStats()
+    capture = secret_capture or SecretCapture.create()
     files: list[tuple[str, str]] = []
-    skipped_binary = 0
-    duplicates: Counter[str] = Counter()
-
     with zipfile.ZipFile(zip_path) as archive:
-        entries = sorted(
-            (item for item in archive.infolist() if not item.is_dir()),
-            key=lambda item: (item.filename.casefold(), item.filename),
-        )
-        for item in entries:
-            if is_generated_or_dependency_path(item.filename):
-                if protection_stats is not None:
-                    protection_stats.generated_files_skipped += 1
-                continue
-            if is_sensitive_path(item.filename):
-                if secret_capture is not None:
-                    raw = archive.read(item)
-                    capture_sensitive_bindings(raw, item.filename, secret_capture)
-                    secret_capture.sensitive_files.append(
-                        {
-                            "name": item.filename,
-                            "bytes": base64.b64encode(raw).decode("ascii"),
-                        }
-                    )
-                if protection_stats is not None:
-                    protection_stats.sensitive_files_skipped += 1
-                continue
-            raw = archive.read(item)
-            if item.filename.casefold().endswith(".pdf"):
-                pdf_text = extract_pdf_text(raw)
-                if pdf_text is not None:
-                    before_redaction = pdf_text
-                    text, redacted = redact_secret_values(
-                        pdf_text,
-                        secret_values=secret_capture.redactions if secret_capture is not None else None,
-                        secret_bindings=secret_capture.bindings if secret_capture is not None else None,
-                        source_path=item.filename,
-                    )
-                    if secret_capture is not None:
-                        secret_capture.redacted_files.append(
-                            {
-                                "name": item.filename,
-                                "text": before_redaction,
-                                "bytes": base64.b64encode(raw).decode("ascii"),
-                            }
-                        )
-                    if protection_stats is not None:
-                        protection_stats.values_redacted += redacted
-                    duplicates[item.filename] += 1
-                    label = item.filename
-                    if duplicates[item.filename] > 1:
-                        label += f" (entrada repetida #{duplicates[item.filename]})"
-                    files.append((label, text))
-                    continue
-                else:
-                    skipped_binary += 1
-                    continue
+        infos = archive.infolist()
+        validate_zip_infos(infos, limits=limits)
+        total = [0]
+        entries = sorted((info for info in infos if not info.is_dir()), key=lambda item: (item.filename.casefold(), item.filename))
+        for info in entries:
+            raw = read_zip_entry(archive, info, limits=limits, total_processed=total)
+            processed = _process_file(info.filename, raw, protection=protection, capture=capture, limits=limits)
+            if processed is not None:
+                files.append(processed)
+    return recover_names_from_includes(files), protection.binary_files_preserved
 
-            text = decode_text(raw)
-            if text is None:
-                skipped_binary += 1
-                continue
-            before_redaction = text
-            text, redacted = redact_secret_values(
-                text,
-                secret_values=secret_capture.redactions if secret_capture is not None else None,
-                secret_bindings=secret_capture.bindings if secret_capture is not None else None,
-                source_path=item.filename,
-            )
-            if redacted and secret_capture is not None:
-                secret_capture.redacted_files.append(
-                    {
-                        "name": item.filename,
-                        "text": before_redaction,
-                        "bytes": base64.b64encode(raw).decode("ascii"),
-                    }
-                )
-            if protection_stats is not None:
-                protection_stats.values_redacted += redacted
-            duplicates[item.filename] += 1
-            label = item.filename
-            if duplicates[item.filename] > 1:
-                label += f" (entrada repetida #{duplicates[item.filename]})"
-            files.append((label, text))
 
-    files = recover_names_from_includes(files)
-    return files, skipped_binary
+def _folder_entries(
+    root: Path,
+    *,
+    exclude_paths: set[Path],
+    protection: ProtectionStats,
+    respect_gitignore: bool,
+    verbose: bool,
+    limits: SecurityLimits,
+) -> Iterable[tuple[str, Path]]:
+    excluded = {os.path.normcase(os.path.abspath(str(path))) for path in exclude_paths}
+    matcher = GitIgnoreMatcher(root) if respect_gitignore else None
+    entries: list[tuple[str, Path]] = []
+    for current, directories, filenames in os.walk(root, topdown=True, followlinks=False):
+        current_path = Path(current)
+        kept: list[str] = []
+        for directory in sorted(directories):
+            path = current_path / directory
+            if path.is_symlink():
+                raise ArchiveSecurityError(f"symbolic links are not supported: {path}")
+            relative = path.relative_to(root).as_posix() + "/"
+            if is_generated_or_dependency_path(relative):
+                continue
+            match = matcher.match(relative) if matcher else None
+            if match and match.ignored:
+                if verbose:
+                    protection.warnings.append(f"Excluded by .gitignore rule {match.rule!r}: {relative}")
+                continue
+            kept.append(directory)
+        directories[:] = kept
+        for filename in filenames:
+            path = current_path / filename
+            if os.path.normcase(os.path.abspath(str(path))) in excluded:
+                continue
+            relative = validate_project_file(path, root, limits=limits)
+            match = matcher.match(relative) if matcher else None
+            if match and match.ignored:
+                protection.gitignored_files_skipped += 1
+                if verbose:
+                    protection.warnings.append(f"Excluded by .gitignore rule {match.rule!r}: {relative}")
+                continue
+            entries.append((relative, path))
+    if len(entries) > limits.max_entries:
+        raise ArchiveSecurityError(f"project has {len(entries)} files; limit is {limits.max_entries}")
+    yield from sorted(entries, key=lambda item: (item[0].casefold(), item[0]))
 
 
 def read_folder_text_files(
@@ -264,113 +246,45 @@ def read_folder_text_files(
     exclude_paths: set[Path] | None = None,
     protection_stats: ProtectionStats | None = None,
     secret_capture: SecretCapture | None = None,
+    limits: SecurityLimits = DEFAULT_LIMITS,
+    respect_gitignore: bool = False,
+    verbose: bool = False,
 ) -> tuple[list[tuple[str, str]], int]:
-    """Read text files under a folder, skipping Git metadata and selected outputs."""
-    folder_path = folder_path.resolve()
-    excluded = {
-        os.path.normcase(os.path.abspath(str(path)))
-        for path in (exclude_paths or set())
-    }
+    root = folder_path.resolve()
+    protection = protection_stats or ProtectionStats()
+    capture = secret_capture or SecretCapture.create()
     files: list[tuple[str, str]] = []
-    skipped_binary = 0
+    total = 0
+    for name, path in _folder_entries(
+        root, exclude_paths=set(exclude_paths or ()), protection=protection,
+        respect_gitignore=respect_gitignore, verbose=verbose, limits=limits,
+    ):
+        raw = path.read_bytes()
+        total += len(raw)
+        if total > limits.max_total_size:
+            raise ArchiveSecurityError("project exceeds the total size limit")
+        processed = _process_file(name, raw, protection=protection, capture=capture, limits=limits)
+        if processed is not None:
+            files.append(processed)
+    return recover_names_from_includes(files), protection.binary_files_preserved
 
-    entries: list[Path] = []
-    for current, directories, filenames in os.walk(folder_path, topdown=True, followlinks=False):
-        directories[:] = sorted(
-            name
-            for name in directories
-            if name.casefold() != ".git" and not (Path(current) / name).is_symlink()
-        )
-        entries.extend(Path(current) / name for name in filenames)
-    entries.sort(key=lambda path: (path.as_posix().casefold(), path.as_posix()))
-    for path in entries:
-        if not path.is_file() or path.is_symlink():
-            continue
-        try:
-            relative = path.relative_to(folder_path)
-        except ValueError:
-            continue
-        if os.path.normcase(os.path.abspath(str(path))) in excluded:
-            continue
-        if is_generated_or_dependency_path(relative.as_posix()):
-            if protection_stats is not None:
-                protection_stats.generated_files_skipped += 1
-            continue
-        if is_sensitive_path(relative.as_posix()):
-            if secret_capture is not None:
-                try:
-                    raw = path.read_bytes()
-                except OSError:
-                    skipped_binary += 1
-                    continue
-                capture_sensitive_bindings(raw, relative.as_posix(), secret_capture)
-                secret_capture.sensitive_files.append(
-                    {
-                        "name": relative.as_posix(),
-                        "bytes": base64.b64encode(raw).decode("ascii"),
-                    }
-                )
-            if protection_stats is not None:
-                protection_stats.sensitive_files_skipped += 1
-            continue
-        try:
-            raw = path.read_bytes()
-        except OSError:
-            skipped_binary += 1
-            continue
 
-        if relative.as_posix().casefold().endswith(".pdf"):
-            pdf_text = extract_pdf_text(raw)
-            if pdf_text is not None:
-                pdf_text = pdf_text.replace("\r\n", "\n").replace("\r", "\n")
-                before_redaction = pdf_text
-                text, redacted = redact_secret_values(
-                    pdf_text,
-                    secret_values=secret_capture.redactions if secret_capture is not None else None,
-                    secret_bindings=secret_capture.bindings if secret_capture is not None else None,
-                    source_path=relative.as_posix(),
-                )
-                if secret_capture is not None:
-                    secret_capture.redacted_files.append(
-                        {
-                            "name": relative.as_posix(),
-                            "text": before_redaction,
-                            "bytes": base64.b64encode(raw).decode("ascii"),
-                        }
-                    )
-                if protection_stats is not None:
-                    protection_stats.values_redacted += redacted
-                files.append((relative.as_posix(), text))
-                continue
-            else:
-                skipped_binary += 1
-                continue
-
-        text = decode_text(raw)
-        if text is None:
-            skipped_binary += 1
-            continue
-        text = text.replace("\r\n", "\n").replace("\r", "\n")
-        before_redaction = text
-        text, redacted = redact_secret_values(
-            text,
-            secret_values=secret_capture.redactions if secret_capture is not None else None,
-            secret_bindings=secret_capture.bindings if secret_capture is not None else None,
-            source_path=relative.as_posix(),
-        )
-        if redacted and secret_capture is not None:
-            secret_capture.redacted_files.append(
-                {
-                    "name": relative.as_posix(),
-                    "text": before_redaction,
-                    "bytes": base64.b64encode(raw).decode("ascii"),
-                }
-            )
-        if protection_stats is not None:
-            protection_stats.values_redacted += redacted
-        files.append((relative.as_posix(), text))
-
-    return recover_names_from_includes(files), skipped_binary
+def convert(
+    zip_path: Path,
+    output_path: Path,
+    *,
+    vault_backend: VaultBackend | None = None,
+    no_vault: bool = False,
+    limits: SecurityLimits = DEFAULT_LIMITS,
+) -> ConversionReport:
+    protection, capture = ProtectionStats(), SecretCapture.create()
+    files, skipped_binary = read_zip_text_files(
+        zip_path, protection_stats=protection, secret_capture=capture, limits=limits,
+    )
+    return write_markdown(
+        zip_path.name, files, skipped_binary, output_path, protection_stats=protection,
+        secret_capture=capture, vault_backend=vault_backend, no_vault=no_vault,
+    )
 
 
 def convert_folder_to_markdown(
@@ -378,30 +292,48 @@ def convert_folder_to_markdown(
     output_path: Path,
     *,
     exclude_paths: set[Path] | None = None,
+    vault_backend: VaultBackend | None = None,
+    no_vault: bool = False,
+    limits: SecurityLimits = DEFAULT_LIMITS,
+    respect_gitignore: bool = False,
+    verbose: bool = False,
 ) -> ConversionReport:
-    """Create a Markdown snapshot directly from a folder, excluding its .git metadata."""
     if not folder_path.is_dir():
-        raise NotADirectoryError(f"no existe la carpeta: {folder_path}")
-    protection = ProtectionStats()
-    excluded = set(exclude_paths or set())
-    # Do not ingest an older export when the destination is inside the source.
-    excluded.add(output_path)
-    excluded.add(secrets_path_for(output_path))
-    secrets = SecretCapture.create()
+        raise NotADirectoryError(f"folder does not exist: {folder_path}")
+    protection, capture = ProtectionStats(), SecretCapture.create()
+    excluded = set(exclude_paths or ()) | {output_path, secrets_path_for(output_path)}
     files, skipped_binary = read_folder_text_files(
-        folder_path,
-        exclude_paths=excluded,
-        protection_stats=protection,
-        secret_capture=secrets,
+        folder_path, exclude_paths=excluded, protection_stats=protection, secret_capture=capture,
+        limits=limits, respect_gitignore=respect_gitignore, verbose=verbose,
     )
     return write_markdown(
-        folder_path.name,
-        files,
-        skipped_binary,
-        output_path,
-        protection_stats=protection,
-        secret_capture=secrets,
+        folder_path.name, files, skipped_binary, output_path, protection_stats=protection,
+        secret_capture=capture, vault_backend=vault_backend, no_vault=no_vault,
     )
+
+
+def _markdown_document(title: str, files: list[tuple[str, str]], skipped_binary: int, protection: ProtectionStats) -> str:
+    lines = [
+        f"# Contents of `{safe_label(title)}`", "",
+        f"Text files included: **{len(files)}** · binary files protected: **{skipped_binary}** · "
+        f"sensitive files protected: **{protection.sensitive_files_skipped}** · "
+        f"dependency/generated files excluded: **{protection.generated_files_skipped}** · "
+        f"potential secret values redacted: **{protection.values_redacted}**.", "",
+        "## Protection report", "",
+        f"- Total detections: **{protection.filtering.total_detections}**",
+        f"- High confidence: **{protection.filtering.high_confidence}**",
+        f"- Contextual confidence: **{protection.filtering.contextual}**",
+        f"- Files affected: **{len(protection.filtering.files_affected)}**", "",
+    ]
+    if files:
+        lines.extend(["## Index", ""])
+        lines.extend(f"- [File {index}](#file-{index:04d}) — `{safe_label(name)}`" for index, (name, _) in enumerate(files, 1))
+        lines.append("")
+    for index, (name, content) in enumerate(files, 1):
+        extension = Path(name).suffix.lower()
+        fence = fence_for(content)
+        lines.extend([f'<a id="file-{index:04d}"></a>', "", f"## `{safe_label(name)}`", "", f"{fence}{LANGUAGES.get(extension, 'text')}", content, fence, ""])
+    return "\n".join(lines)
 
 
 def write_markdown(
@@ -412,99 +344,78 @@ def write_markdown(
     *,
     protection_stats: ProtectionStats | None = None,
     secret_capture: SecretCapture | None = None,
+    vault_backend: VaultBackend | None = None,
+    no_vault: bool = False,
 ) -> ConversionReport:
     protection = protection_stats or ProtectionStats()
-    lines = [
-        f"# Contenido de `{safe_label(title)}`",
-        "",
-        f"Archivos de texto incluidos: **{len(files)}** · "
-        f"archivos binarios omitidos: **{skipped_binary}** · "
-        f"archivos sensibles omitidos: **{protection.sensitive_files_skipped}** · "
-        f"archivos de dependencias/artefactos omitidos: **{protection.generated_files_skipped}** · "
-        f"valores potencialmente secretos redactados: **{protection.values_redacted}**.",
-        "",
-    ]
-
-    if files:
-        lines.extend(["## Índice", ""])
-        for index, (name, _) in enumerate(files, start=1):
-            lines.append(f"- [Archivo {index}](#archivo-{index:04d}) — `{safe_label(name)}`")
-        lines.append("")
-
-    for index, (name, content) in enumerate(files, start=1):
-        extension = Path(name.split(" (entrada repetida #", 1)[0]).suffix.lower()
-        language = LANGUAGES.get(extension, "text")
-        fence = fence_for(content)
-        lines.extend(
-            [
-                f'<a id="archivo-{index:04d}"></a>',
-                "",
-                f"## `{safe_label(name)}`",
-                "",
-                f"{fence}{language}",
-                content,
-                fence,
-                "",
-            ]
+    capture = secret_capture or SecretCapture.create()
+    payload = capture.payload()
+    sidecar = secrets_path_for(output_path)
+    requires_vault = payload_requires_vault(payload)
+    if no_vault and requires_vault:
+        raise VaultUnavailableError(
+            "--no-vault cannot export this project because it requires protected recovery data for secrets, PDFs, sensitive files, or binaries"
         )
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    sidecar_path = secrets_path_for(output_path)
-    if secret_capture is not None:
-        # Commit the encrypted recovery data first so we never publish a Markdown
-        # containing secret markers without its matching local vault.
-        save_secrets(sidecar_path, secret_capture.payload())
-    output_path.write_text("\n".join(lines), encoding="utf-8", newline="")
+    selected_sidecar: Path | None = None
+    if requires_vault:
+        save_secrets(sidecar, payload, backend=vault_backend)
+        selected_sidecar = sidecar
+    elif sidecar.exists():
+        sidecar.unlink()
+    atomic_write_text(output_path, _markdown_document(title, files, skipped_binary, protection))
+    warnings = tuple(protection.filtering.warnings + protection.warnings)
     return ConversionReport(
-        len(files),
-        skipped_binary,
-        protection.sensitive_files_skipped,
-        protection.generated_files_skipped,
-        protection.values_redacted,
-        sidecar_path,
+        len(files), skipped_binary, protection.sensitive_files_skipped,
+        protection.generated_files_skipped, protection.values_redacted, selected_sidecar,
+        protection.binary_files_preserved, protection.filtering.high_confidence,
+        protection.filtering.contextual, tuple(sorted(protection.filtering.files_affected)),
+        warnings, protection.gitignored_files_skipped,
+    )
+
+
+def _limits_from_args(args: argparse.Namespace) -> SecurityLimits:
+    return SecurityLimits(
+        max_entries=args.max_entries,
+        max_file_size=args.max_file_mb * 1024 * 1024,
+        max_total_size=args.max_total_mb * 1024 * 1024,
+        max_pdf_pages=args.max_pdf_pages,
+        max_compression_ratio=args.max_compression_ratio,
     )
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Reúne los archivos de texto de un ZIP o carpeta en un único Markdown ordenado."
-    )
-    parser.add_argument("input", type=Path, help="Archivo ZIP o carpeta de entrada")
-    parser.add_argument(
-        "-o",
-        "--output",
-        type=Path,
-        help="Markdown de salida (por defecto, junto al origen y con extensión .md)",
-    )
+    parser = argparse.ArgumentParser(description="Export a project folder or ZIP to AI-friendly Markdown.")
+    parser.add_argument("input", type=Path)
+    parser.add_argument("-o", "--output", type=Path)
+    parser.add_argument("--no-vault", action="store_true", help="Allow only exports that require no protected recovery data")
+    parser.add_argument("--respect-gitignore", action="store_true")
+    parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--max-entries", type=int, default=DEFAULT_LIMITS.max_entries)
+    parser.add_argument("--max-file-mb", type=int, default=100)
+    parser.add_argument("--max-total-mb", type=int, default=1024)
+    parser.add_argument("--max-pdf-pages", type=int, default=DEFAULT_LIMITS.max_pdf_pages)
+    parser.add_argument("--max-compression-ratio", type=float, default=DEFAULT_LIMITS.max_compression_ratio)
     args = parser.parse_args()
-
     source = args.input
     if not source.exists() or not (source.is_file() or source.is_dir()):
-        parser.error(f"no existe el archivo o carpeta: {source}")
+        parser.error(f"input does not exist: {source}")
     if source.is_file() and source.suffix.casefold() != ".zip":
-        parser.error("el archivo de entrada debe ser un ZIP")
-    default_output = (
-        source.with_name(source.name + ".md") if source.is_dir() else source.with_suffix(".md")
-    )
-    output = args.output or default_output
+        parser.error("input file must be a ZIP")
+    output = args.output or (source.with_name(source.name + ".md") if source.is_dir() else source.with_suffix(".md"))
     if output.resolve() == source.resolve():
-        parser.error("el archivo de salida no puede sobrescribir el origen")
-
+        parser.error("output cannot overwrite the input")
     try:
-        if source.is_dir():
-            report = convert_folder_to_markdown(source, output)
-        else:
-            report = convert(source, output)
-    except (OSError, zipfile.BadZipFile, RuntimeError, NotADirectoryError) as error:
-        parser.error(f"no se pudo convertir el origen: {error}")
-
-    print(
-        f"Creado: {output} ({report.included} archivos de texto; "
-        f"{report.skipped_binary} binarios y {report.sensitive_files_skipped} archivos "
-        f"sensibles omitidos; {report.generated_files_skipped} archivos de dependencias/artefactos "
-        f"omitidos; {report.values_redacted} valores redactados). "
-        f"Vault local cifrado: {report.secrets_file}"
-    )
+        limits = _limits_from_args(args)
+        report = (
+            convert_folder_to_markdown(source, output, no_vault=args.no_vault, limits=limits, respect_gitignore=args.respect_gitignore, verbose=args.verbose)
+            if source.is_dir() else convert(source, output, no_vault=args.no_vault, limits=limits)
+        )
+    except (OSError, ValueError, zipfile.BadZipFile, RuntimeError) as error:
+        parser.error(f"export failed: {error}")
+    vault = str(report.secrets_file) if report.secrets_file else "not required"
+    print(f"Created: {output} ({report.included} text files; {report.values_redacted} values redacted; vault: {vault})")
+    for warning in report.warnings if args.verbose else ():
+        print(f"Warning: {warning}")
     return 0
 
 
