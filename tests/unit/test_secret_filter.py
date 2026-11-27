@@ -20,6 +20,15 @@ def test_functional_values_are_not_redacted(line: str) -> None:
     'access_token = "TEST_ONLY_access_token_12345"',
     'database_password = "TEST_ONLY_database_password_12345"',
     'password = "TEST_ONLY_password_12345"',
+    'DJANGO_SECRET_KEY = "TEST_ONLY_django_secret_12345"',
+    'STRIPE_SECRET_KEY = "TEST_ONLY_stripe_secret_12345"',
+    'POSTGRES_PASSWORD = "TEST_ONLY_postgres_password_12345"',
+    'LEGACY_PASSWD = "TEST_ONLY_legacy_password_12345"',
+    'SERVICE_API_KEY = "TEST_ONLY_service_key_12345"',
+    'OAUTH_ACCESS_TOKEN = "TEST_ONLY_access_token_12345"',
+    'OAUTH_REFRESH_TOKEN = "TEST_ONLY_refresh_token_12345"',
+    'TLS_PRIVATE_KEY = "TEST_ONLY_private_key_12345"',
+    'DATABASE_CONNECTION_STRING = "TEST_ONLY_connection_string_12345"',
 ])
 def test_high_confidence_names_redact(line: str) -> None:
     report = FilterReport()

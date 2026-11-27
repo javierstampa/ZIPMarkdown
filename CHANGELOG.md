@@ -1,8 +1,33 @@
 # Changelog
 
-All notable changes follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The project uses semantic package versions; the first public tag is `v0.1.0b1`.
+All notable changes follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The project uses PEP 440 prerelease versions and matching `v<version>` tags.
 
 ## [Unreleased]
+
+## [0.1.0b2] - 2026-11-27
+
+### Added
+- A signed snapshot manifest with a unique export ID, original document SHA-256, and explicit entry count, including empty snapshots.
+- Regression coverage for moved, duplicated, and unbound secret markers; truncated Markdown; empty projects; mismatched Markdown/vault pairs; and paired-write rollback.
+- Release provenance attestations and a complete SHA-256 attachment manifest.
+
+### Changed
+- Markdown and vault outputs are committed as a rollback-protected pair.
+- Release tags must match the package version and pass tests, coverage, Ruff, compilation, Gitleaks, Windows DPAPI tests, and clean tagged-commit builds.
+- GUI dependencies are optional under the `gui` extra; supported Python is explicitly `>=3.10,<3.13`.
+- The local website prototype is excluded from the canonical source and release artifacts.
+
+### Fixed
+- Rejects unclosed final fences instead of silently rebuilding a partial project.
+- Empty folders and ZIPs now round-trip through an explicit zero-entry snapshot.
+- Compound secret names such as `DJANGO_SECRET_KEY`, `STRIPE_SECRET_KEY`, and `POSTGRES_PASSWORD` are high-confidence detections.
+- Packaged documentation uses stable absolute links and a tag-pinned logo URL.
+
+### Security
+- Secret markers are restored only in their bound path (or one unique filename recovery); moved, duplicated, unknown, or unbound markers abort before secret material is inserted.
+- Markdown/vault association metadata is verified before protected data is restored.
+
+## [0.1.0b1] - 2026-11-26
 
 ### Added
 - Regression tests for destructive import/export/vault/rebase path aliases and output-extension enforcement.

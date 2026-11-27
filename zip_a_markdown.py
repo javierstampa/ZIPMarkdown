@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
+import json
 import os
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
+from uuid import uuid4
 
 from archive_safety import (
     DEFAULT_LIMITS,
@@ -20,11 +23,11 @@ from archive_safety import (
     validate_project_file,
     validate_zip_infos,
 )
-from atomic_utils import atomic_write_text
+from atomic_utils import atomic_write_pair
 from filename_recovery import recover_names_from_includes
 from gitignore_support import GitIgnoreMatcher
 from local_secrets import (
-    VaultBackend, VaultUnavailableError, payload_requires_vault, save_secrets, secrets_path_for,
+    VaultBackend, VaultUnavailableError, payload_requires_vault, secrets_path_for, serialize_secrets,
 )
 from pdf_extractor import extract_pdf_text
 from path_safety import ensure_distinct_paths, require_suffix
@@ -39,6 +42,7 @@ LANGUAGES = {
     ".swift": "swift", ".toml": "toml", ".ts": "typescript", ".tsx": "tsx", ".txt": "text",
     ".xml": "xml", ".yaml": "yaml", ".yml": "yaml",
 }
+SNAPSHOT_FORMAT = 1
 
 
 @dataclass
@@ -381,7 +385,18 @@ def write_markdown(
         raise VaultUnavailableError(
             "--no-vault cannot export this project because it requires protected recovery data for secrets, PDFs, sensitive files, or binaries"
         )
-    document = _markdown_document(title, files, skipped_binary, protection)
+    document_body = _markdown_document(title, files, skipped_binary, protection)
+    export_id = uuid4().hex
+    markdown_sha256 = hashlib.sha256(document_body.encode("utf-8")).hexdigest()
+    manifest = {
+        "entries": len(files),
+        "export_id": export_id,
+        "format": SNAPSHOT_FORMAT,
+        "markdown_sha256": markdown_sha256,
+    }
+    document = f"<!-- ZIPMARKDOWN-MANIFEST {json.dumps(manifest, separators=(',', ':'), sort_keys=True)} -->\n{document_body}"
+    payload["export_id"] = export_id
+    payload["markdown_sha256"] = markdown_sha256
     if strict_secrets:
         if protection.filtering.warnings:
             raise ValueError(
@@ -389,13 +404,15 @@ def write_markdown(
             )
         from secret_scanner import scan_markdown_with_gitleaks
         scan_markdown_with_gitleaks(document)
-    selected_sidecar: Path | None = None
-    if requires_vault:
-        save_secrets(sidecar, payload, backend=vault_backend)
-        selected_sidecar = sidecar
-    elif sidecar.exists():
-        sidecar.unlink()
-    atomic_write_text(output_path, document)
+    selected_sidecar = sidecar if requires_vault else None
+    vault_bytes = serialize_secrets(payload, backend=vault_backend) if requires_vault else None
+    atomic_write_pair(
+        output_path,
+        document.encode("utf-8"),
+        sidecar,
+        vault_bytes,
+        secondary_mode=0o600,
+    )
     warnings = tuple(protection.filtering.warnings + protection.warnings)
     return ConversionReport(
         len(files), skipped_binary, protection.sensitive_files_skipped,

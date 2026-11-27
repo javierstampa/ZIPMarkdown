@@ -1,12 +1,12 @@
 <p align="center">
-  <img src="assets/zipmarkdown-logo.png" alt="ZIPMarkdown" width="640" />
+  <img src="https://raw.githubusercontent.com/javierstampa/ZIPMarkdown/v0.1.0b2/assets/zipmarkdown-logo.png" alt="ZIPMarkdown" width="640" />
 </p>
 
 # ZIPMarkdown
 
 **Exporta un proyecto completo a Markdown apto para una IA, redacta secretos localmente, permite que una IA modifique el proyecto y restaura de forma conservadora los valores protegidos al reconstruirlo.**
 
-> **Beta:** versión del paquete `0.1.0b1`; primera etiqueta pública prevista: `v0.1.0b1`. Mantén una copia de seguridad antes de usar la beta en proyectos críticos.
+> **Beta:** versión del paquete `0.1.0b2`; primera etiqueta pública prevista: `v0.1.0b2`. Mantén una copia de seguridad antes de usar la beta en proyectos críticos.
 
 ZIPMarkdown cierra el ciclo completo sin telemetría:
 
@@ -27,6 +27,8 @@ python -m venv .venv
 # Windows: .venv\Scripts\activate
 # Linux/macOS: source .venv/bin/activate
 python -m pip install .
+# Añade las dependencias opcionales de bandeja/GUI cuando sean necesarias:
+python -m pip install ".[gui]"
 # o, para una instalación aislada:
 pipx install .
 ```
@@ -34,7 +36,7 @@ pipx install .
 Desarrollo:
 
 ```bash
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[dev,gui]"
 ```
 
 ## Uso por CLI
@@ -148,7 +150,7 @@ python -m ruff check .
 python -m build
 ```
 
-CI prueba Python 3.10, 3.11 y 3.12 en Linux y Windows. Windows ejecuta pruebas DPAPI reales y construye el EXE. El workflow de release se dispara con etiquetas `v*` (empezando por `v0.1.0b1`).
+CI prueba Python 3.10, 3.11 y 3.12 en Linux y Windows. Windows ejecuta pruebas DPAPI reales y construye el EXE. El workflow de release solo acepta etiquetas prerelease PEP 440 que coincidan con la versión del paquete (empezando por `v0.1.0b2`).
 
 Repositorio e incidencias: https://github.com/javierstampa/ZIPMarkdown (configurado en `pyproject.toml`).
 
@@ -159,6 +161,6 @@ Repositorio e incidencias: https://github.com/javierstampa/ZIPMarkdown (configur
 - No hay OCR para PDFs escaneados.
 - Keychain, Secret Service y vault por contraseña quedan en el roadmap.
 - Las pruebas reales de GUI, DPAPI y EXE requieren Windows.
-- No publiques una vulnerabilidad; sigue [SECURITY.md](SECURITY.md).
+- No publiques una vulnerabilidad; sigue [SECURITY.md](https://github.com/javierstampa/ZIPMarkdown/blob/v0.1.0b2/SECURITY.md).
 
-Consulta [CONTRIBUTING.md](CONTRIBUTING.md), [CHANGELOG.md](CHANGELOG.md) y la [licencia MIT](LICENSE). Roadmap breve: backends nativos para macOS/Linux, vault portable opcional, OCR, firma de ejecutables e informes dry-run más ricos.
+Consulta [CONTRIBUTING.md](https://github.com/javierstampa/ZIPMarkdown/blob/v0.1.0b2/CONTRIBUTING.md), [CHANGELOG.md](https://github.com/javierstampa/ZIPMarkdown/blob/v0.1.0b2/CHANGELOG.md) y la [licencia MIT](https://github.com/javierstampa/ZIPMarkdown/blob/v0.1.0b2/LICENSE). Roadmap breve: backends nativos para macOS/Linux, vault portable opcional, OCR, firma de ejecutables e informes dry-run más ricos.

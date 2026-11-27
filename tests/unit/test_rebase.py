@@ -23,6 +23,34 @@ def test_original_marker_is_restored() -> None:
     assert "TEST_ONLY_original" in files[0][1]
     assert report.values_applied == 1
 
+
+def test_moved_marker_is_rejected_without_disclosing_secret() -> None:
+    token = "a" * 32
+    marker = f"[[MDTK_SECRET_{token}]]"
+    with pytest.raises(ValueError, match="was moved"):
+        rebase_text_files(
+            [("src/settings.py", 'API_KEY = "YOUR_API_KEY"\n'), ("README.md", marker)],
+            payload(),
+        )
+
+
+def test_duplicated_marker_is_rejected() -> None:
+    token = "a" * 32
+    marker = f"[[MDTK_SECRET_{token}]]"
+    with pytest.raises(ValueError, match="exactly once"):
+        rebase_text_files(
+            [("src/settings.py", marker), ("public.txt", marker)],
+            payload(),
+        )
+
+
+def test_marker_without_binding_is_rejected() -> None:
+    token = "a" * 32
+    vault = payload()
+    vault["bindings"] = []
+    with pytest.raises(ValueError, match="no valid path binding"):
+        rebase_text_files([("src/settings.py", f"[[MDTK_SECRET_{token}]]")], vault)
+
 def test_new_real_value_is_never_overwritten() -> None:
     files, report = rebase_text_files([("src/settings.py", 'API_KEY = "TEST_ONLY_new_ai_value_67890"\n')], payload())
     assert "new_ai_value" in files[0][1]

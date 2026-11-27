@@ -36,6 +36,10 @@ HIGH_CONFIDENCE_KEYS = {
     "db_password", "authorization_header", "connection_string", "subscription_key",
     "aws_secret_access_key", "secret_access_key", "password", "passwd",
 }
+HIGH_CONFIDENCE_KEY_SUFFIXES = (
+    "password", "passwd", "secret", "secret_key", "api_key", "access_token",
+    "refresh_token", "private_key", "connection_string",
+)
 GENERIC_KEYS = {"key", "auth", "authorization", "token", "secret"}
 TRIVIAL_VALUES = {"", "none", "null", "true", "false", "0", "1", "oauth2", "bearer", "asc", "desc", "id", "undefined", "nil"}
 KNOWN_PREFIXES = ("sk-", "rk-", "github_pat_", "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "AKIA", "AIza", "xoxb-", "xoxa-", "xoxp-", "xoxr-", "xoxs-")
@@ -144,7 +148,10 @@ def _confidence(key: str, value: str) -> str | None:
     normalized_key = _clean_key(key)
     if any(inner.startswith(prefix) for prefix in KNOWN_PREFIXES):
         return "high"
-    if normalized_key in HIGH_CONFIDENCE_KEYS:
+    if normalized_key in HIGH_CONFIDENCE_KEYS or any(
+        normalized_key == suffix or normalized_key.endswith("_" + suffix)
+        for suffix in HIGH_CONFIDENCE_KEY_SUFFIXES
+    ):
         return "high"
     if normalized_key in GENERIC_KEYS:
         if len(inner) >= 12 and shannon_entropy(inner) >= 3.0 and any(c.isalnum() for c in inner):

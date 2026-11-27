@@ -1,4 +1,5 @@
 from __future__ import annotations
+import shutil
 import zipfile
 from pathlib import Path
 import pytest
@@ -74,3 +75,80 @@ def test_optional_gitignore_reports_rule(tmp_path: Path) -> None:
     )
     assert report.gitignored_files_skipped == 1
     assert any("ignored.txt" in warning and "ignored.txt" in warning for warning in report.warnings)
+
+
+def test_truncated_final_fence_is_rejected(tmp_path: Path) -> None:
+    markdown = tmp_path / "truncated.md"
+    markdown.write_text(
+        "## `a.txt`\n\n```text\na\n```\n\n## `b.txt`\n\n```text\nb\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="truncated Markdown"):
+        markdown_a_zip.parse_markdown(markdown)
+
+
+def test_empty_project_round_trip_uses_explicit_snapshot_manifest(tmp_path: Path) -> None:
+    source = tmp_path / "empty-project"
+    source.mkdir()
+    markdown = tmp_path / "empty.md"
+    rebuilt_zip = tmp_path / "empty.zip"
+    rebuilt_folder = tmp_path / "rebuilt-empty"
+    report = zip_a_markdown.convert_folder_to_markdown(source, markdown)
+    assert report.included == 0
+    assert '"entries":0' in markdown.read_text(encoding="utf-8")
+    assert markdown_a_zip.convert(markdown, rebuilt_zip) == 0
+    with zipfile.ZipFile(rebuilt_zip) as archive:
+        assert archive.infolist() == []
+    assert markdown_a_zip.convert_to_folder(markdown, rebuilt_folder) == 0
+    assert list(rebuilt_folder.iterdir()) == []
+
+
+def test_markdown_and_vault_from_different_exports_are_rejected(
+    tmp_path: Path, test_vault: TestVaultBackend
+) -> None:
+    vaults: list[Path] = []
+    markdowns: list[Path] = []
+    for number in (1, 2):
+        source = tmp_path / f"project-{number}"
+        source.mkdir()
+        (source / "config.py").write_text(
+            f'API_KEY = "TEST_ONLY_export_secret_{number}_123456"\n', encoding="utf-8"
+        )
+        markdown = tmp_path / f"project-{number}.md"
+        zip_a_markdown.convert_folder_to_markdown(source, markdown, vault_backend=test_vault)
+        markdowns.append(markdown)
+        vaults.append(markdown.with_suffix(".secrets"))
+    shutil.copyfile(vaults[1], vaults[0])
+    with pytest.raises(ValueError, match="different ZIPMarkdown exports"):
+        markdown_a_zip.convert(markdowns[0], tmp_path / "mismatch.zip", vault_backend=test_vault)
+
+
+def test_pair_write_rolls_back_when_markdown_replace_fails(
+    tmp_path: Path, test_vault: TestVaultBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import atomic_utils
+
+    source = tmp_path / "project"
+    source.mkdir()
+    (source / "config.py").write_text(
+        'API_KEY = "TEST_ONLY_rollback_secret_123456"\n', encoding="utf-8"
+    )
+    markdown = tmp_path / "project.md"
+    vault = markdown.with_suffix(".secrets")
+    markdown.write_bytes(b"old markdown")
+    vault.write_bytes(b"old vault")
+    real_replace = atomic_utils.os.replace
+    raised = False
+
+    def fail_markdown_once(source_path, destination_path):
+        nonlocal raised
+        if not raised and Path(destination_path) == markdown and str(source_path).endswith(".tmp"):
+            raised = True
+            raise OSError("simulated Markdown commit failure")
+        return real_replace(source_path, destination_path)
+
+    monkeypatch.setattr(atomic_utils.os, "replace", fail_markdown_once)
+    with pytest.raises(OSError, match="simulated Markdown commit failure"):
+        zip_a_markdown.convert_folder_to_markdown(source, markdown, vault_backend=test_vault)
+    assert markdown.read_bytes() == b"old markdown"
+    assert vault.read_bytes() == b"old vault"

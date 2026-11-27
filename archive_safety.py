@@ -79,7 +79,7 @@ def validate_zip_infos(infos: list[zipfile.ZipInfo], *, limits: SecurityLimits =
             validate_archive_name(name, limits=limits)
         folded = canonical_archive_key(name)
         if folded in seen:
-            raise ArchiveSecurityError(f"duplicate or canonical path collision in ZIP: {info.filename!r}")
+            raise ArchiveSecurityError(f"canonical path collision in ZIP: {info.filename!r}")
         seen.add(folded)
         if info.flag_bits & 0x1:
             raise ArchiveSecurityError(f"encrypted ZIP entries are not supported: {info.filename!r}")

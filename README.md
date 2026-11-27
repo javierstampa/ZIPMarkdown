@@ -1,12 +1,12 @@
 <p align="center">
-  <img src="assets/zipmarkdown-logo.png" alt="ZIPMarkdown" width="640" />
+  <img src="https://raw.githubusercontent.com/javierstampa/ZIPMarkdown/v0.1.0b2/assets/zipmarkdown-logo.png" alt="ZIPMarkdown" width="640" />
 </p>
 
 # ZIPMarkdown
 
 **Export a complete project to AI-friendly Markdown, redact secrets locally, let an AI modify the project, and conservatively restore protected values when rebuilding it.**
 
-> **Beta:** package version `0.1.0b1`; first public pre-release tag `v0.1.0b1`. Keep a backup before using beta builds on critical projects.
+> **Beta:** package version `0.1.0b2`; first public pre-release tag `v0.1.0b2`. Keep a backup before using beta builds on critical projects.
 
 ZIPMarkdown is a local, no-telemetry round-trip tool. Unlike one-way “folder to prompt” converters, it keeps the recovery path in scope: filenames, text, PDFs, binaries, sensitive files, and protected values can be rebuilt after an AI edits the Markdown.
 
@@ -26,7 +26,7 @@ Sending a project to an AI creates two competing risks: omitting important non-t
 - Conservative rebase by marker, path, variable name, and safe unique filename recovery.
 - Exact recovery of PDFs, binaries, sensitive files, non-UTF-8 text, and untouched protected files.
 - ZIP Slip, absolute path, traversal, Windows reserved-name, duplicate, encrypted-entry, symlink, size, page-count, and compression-ratio defenses.
-- Atomic Markdown, vault, ZIP, and rebase outputs.
+- Transactional Markdown/vault pair updates with rollback, plus atomic ZIP and rebase outputs.
 - Optional `.gitignore` matching; security and dependency exclusions always remain active.
 - Local operation with no analytics, sync, API calls, or telemetry.
 
@@ -42,6 +42,8 @@ python -m venv .venv
 source .venv/bin/activate
 
 python -m pip install .
+# Add the optional Windows tray/GUI dependencies when needed:
+python -m pip install ".[gui]"
 ```
 
 For isolated CLI installation:
@@ -53,7 +55,7 @@ pipx install .
 Development and executable-build tools:
 
 ```bash
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[dev,gui]"
 ```
 
 ## CLI
@@ -195,7 +197,7 @@ python -m ruff check .
 python -m build
 ```
 
-Linux CI runs portable logic with an injected test vault. Windows CI runs the same suite plus real DPAPI tests and builds the executable. The release workflow triggers on `v*` tags (starting with `v0.1.0b1`).
+Linux CI runs portable logic with an injected test vault. Windows CI runs the same suite plus real DPAPI tests and builds the executable. The release workflow accepts only PEP 440 prerelease tags matching the package version (starting with `v0.1.0b2`).
 
 Repository and issue tracker: https://github.com/javierstampa/ZIPMarkdown (configured in `pyproject.toml`).
 
@@ -208,11 +210,11 @@ Repository and issue tracker: https://github.com/javierstampa/ZIPMarkdown (confi
 - macOS Keychain, Linux Secret Service, and password-encrypted vaults are roadmap items, not beta features.
 - The GUI and real DPAPI/executable smoke tests require Windows.
 
-Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md). Do not put sensitive details in a public issue.
+Report vulnerabilities privately as described in [SECURITY.md](https://github.com/javierstampa/ZIPMarkdown/blob/v0.1.0b2/SECURITY.md). Do not put sensitive details in a public issue.
 
 ## Contributing, license, roadmap
 
-See [CONTRIBUTING.md](CONTRIBUTING.md), [CHANGELOG.md](CHANGELOG.md), and [SECURITY.md](SECURITY.md). ZIPMarkdown is licensed under the [MIT License](LICENSE).
+See [CONTRIBUTING.md](https://github.com/javierstampa/ZIPMarkdown/blob/v0.1.0b2/CONTRIBUTING.md), [CHANGELOG.md](https://github.com/javierstampa/ZIPMarkdown/blob/v0.1.0b2/CHANGELOG.md), and [SECURITY.md](https://github.com/javierstampa/ZIPMarkdown/blob/v0.1.0b2/SECURITY.md). ZIPMarkdown is licensed under the [MIT License](https://github.com/javierstampa/ZIPMarkdown/blob/v0.1.0b2/LICENSE).
 
 Roadmap: native macOS/Linux vault backends, optional password-protected portable vaults, OCR hooks, signed Windows releases, and richer dry-run reports.
 

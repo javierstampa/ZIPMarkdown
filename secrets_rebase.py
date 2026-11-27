@@ -98,16 +98,45 @@ def rebase_text_files(files: list[tuple[str, str]], payload: dict[str, Any]) -> 
     warnings: list[str] = []
     ambiguous = 0
 
-    for index, (name, content) in enumerate(result):
-        def restore_marker(match: re.Match[str]) -> str:
-            nonlocal applied_count
-            token = match.group(1)
-            if token not in redactions:
-                return match.group(0)
-            restored.add(token)
-            applied_count += 1
-            return str(redactions[token])
-        result[index] = (name, TOKEN_RE.sub(restore_marker, content))
+    binding_by_token: dict[str, dict[str, Any]] = {}
+    for binding in bindings:
+        if not isinstance(binding, dict):
+            continue
+        token = binding.get("token")
+        if not isinstance(token, str):
+            continue
+        if token in binding_by_token:
+            raise ValueError(f"vault contains duplicate bindings for secret marker {token}")
+        binding_by_token[token] = binding
+
+    marker_locations: dict[str, list[int]] = {}
+    for index, (_, content) in enumerate(result):
+        for match in TOKEN_RE.finditer(content):
+            marker_locations.setdefault(match.group(1), []).append(index)
+    for token, locations in marker_locations.items():
+        if token not in redactions:
+            raise ValueError(f"Markdown contains an unrecognized secret marker {token}")
+        binding = binding_by_token.get(token)
+        if binding is None or not isinstance(binding.get("path"), str):
+            raise ValueError(f"secret marker {token} has no valid path binding")
+        if len(locations) != 1:
+            raise ValueError(f"secret marker {token} must occur exactly once; found {len(locations)}")
+        source_path = binding["path"]
+        candidates, recovery_warning = _candidate_indices(source_path, result)
+        if len(candidates) != 1:
+            raise ValueError(f"secret marker {token} cannot be bound unambiguously to {source_path!r}")
+        marker_index = locations[0]
+        if marker_index != candidates[0]:
+            raise ValueError(
+                f"secret marker {token} was moved from {source_path!r} to {result[marker_index][0]!r}"
+            )
+        if recovery_warning:
+            warnings.append(recovery_warning)
+        name, content = result[marker_index]
+        marker = f"[[MDTK_SECRET_{token}]]"
+        result[marker_index] = (name, content.replace(marker, str(redactions[token]), 1))
+        restored.add(token)
+        applied_count += 1
 
     unresolved: set[str] = set()
     for binding in bindings:
@@ -203,6 +232,20 @@ def rebase_text_files(files: list[tuple[str, str]], payload: dict[str, Any]) -> 
         ambiguous_cases=ambiguous,
         warnings=tuple(dict.fromkeys(warnings)),
     )
+
+
+def _validate_markdown_vault_pair(manifest: dict[str, object] | None, payload: dict[str, Any]) -> None:
+    payload_export = payload.get("export_id")
+    payload_hash = payload.get("markdown_sha256")
+    manifest_export = manifest.get("export_id") if manifest is not None else None
+    manifest_hash = manifest.get("markdown_sha256") if manifest is not None else None
+    values = (payload_export, payload_hash, manifest_export, manifest_hash)
+    if all(value is None for value in values):
+        return  # Legacy v0.1.0b1 pair.
+    if not all(isinstance(value, str) and value for value in values):
+        raise ValueError("Markdown and vault association metadata is incomplete")
+    if payload_export != manifest_export or payload_hash != manifest_hash:
+        raise ValueError("Markdown and vault belong to different ZIPMarkdown exports")
 
 
 def _decode_protected_files(payload: dict[str, Any], existing_names: set[str]) -> tuple[list[tuple[str, bytes]], int, int]:
@@ -312,6 +355,8 @@ def rebase_markdown_file(
     require_suffix(secrets_path, ".secrets", "vault")
     ensure_distinct_paths(input=markdown_path, output=output_path, vault=secrets_path)
     payload = load_secrets(secrets_path, backend=vault_backend)
+    manifest = markdown_a_zip.read_snapshot_manifest(markdown_path, limits=limits)
+    _validate_markdown_vault_pair(manifest, payload)
     files = markdown_a_zip.parse_markdown(markdown_path, limits=limits)
     rebased, report = rebase_text_files(files, payload)
     for name, _ in rebased:

@@ -8,11 +8,13 @@ ZIPMarkdown `0.1.x` beta receives security fixes. Pre-release behavior may chang
 
 Do **not** disclose a suspected vulnerability, secret-detection bypass, path traversal, vault weakness, or credential in a public issue.
 
-Report suspected vulnerabilities privately using GitHub Private Vulnerability Reporting:
+Use [GitHub Private Vulnerability Reporting](https://github.com/javierstampa/ZIPMarkdown/security/advisories/new) (**Security → Report a vulnerability**). Reports submitted there are private and visible only to the maintainers until a coordinated disclosure is agreed.
 
-https://github.com/javierstampa/ZIPMarkdown/security/advisories/new
+The maintainer must enable GitHub private vulnerability reporting in **Settings → Security → Code security and analysis** before making the repository public. Verify that the **Report a vulnerability** button is visible from a signed-out or non-maintainer account. If it is unavailable, pause publication; never redirect a reporter to a public issue.
 
-Include the affected version, reproduction steps, and impact, but never attach real credentials or a production vault.
+Include the affected version, reproduction steps, expected impact, and a minimal synthetic fixture. Never attach real credentials, a production `.secrets` vault, or customer data. The project aims to acknowledge a report within 3 business days and provide an initial assessment within 7 business days; these are response targets, not a promise of a fix date.
+
+Maintainers will coordinate remediation and disclosure through the private advisory. Credit is offered unless the reporter asks to remain anonymous.
 
 ## Security model
 

@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0"
 
-python -m pip install ".[dev]"
+python -m pip install ".[dev,gui]"
 if errorlevel 1 goto :error
 
 if exist "dist\ZIPMarkdown.exe" del /q "dist\ZIPMarkdown.exe"

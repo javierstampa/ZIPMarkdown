@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -27,6 +28,7 @@ HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$")
 FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 INLINE_CODE_RE = re.compile(r"(?<!\\)`([^`\n]+)(?<!\\)`")
 FILE_LABEL_RE = re.compile(r"^\s{0,3}(?:[-*+]\s*)?(?:\*\*)?(?:archivo|file|ruta|path)(?:\*\*)?\s*(?:#\d+)?\s*[:：]\s*(.+?)\s*$", re.I)
+MANIFEST_RE = re.compile(r"^<!-- ZIPMARKDOWN-MANIFEST (?P<payload>\{.*\}) -->$")
 GENERIC_HEADINGS = {
     "índice", "indice", "index", "contenido", "contents", "archivos", "archivos incluidos",
     "files", "files included", "resumen", "summary", "instrucciones", "instructions",
@@ -97,6 +99,50 @@ def _limited_markdown_lines(markdown_path: Path, limits: SecurityLimits):
                 raise ValueError("Markdown must be valid UTF-8") from error
 
 
+def _parse_manifest_line(line: str) -> dict[str, object] | None:
+    match = MANIFEST_RE.fullmatch(line.rstrip("\r"))
+    if match is None:
+        return None
+    try:
+        manifest = json.loads(match.group("payload"))
+    except json.JSONDecodeError as error:
+        raise ValueError("ZIPMarkdown snapshot manifest is invalid JSON") from error
+    if not isinstance(manifest, dict) or manifest.get("format") != 1:
+        raise ValueError("unsupported ZIPMarkdown snapshot manifest")
+    entries = manifest.get("entries")
+    if not isinstance(entries, int) or isinstance(entries, bool) or entries < 0:
+        raise ValueError("ZIPMarkdown snapshot manifest has an invalid entry count")
+    export_id, digest = manifest.get("export_id"), manifest.get("markdown_sha256")
+    if not isinstance(export_id, str) or re.fullmatch(r"[a-f0-9]{32}", export_id) is None:
+        raise ValueError("ZIPMarkdown snapshot manifest has an invalid export ID")
+    if not isinstance(digest, str) or re.fullmatch(r"[a-f0-9]{64}", digest) is None:
+        raise ValueError("ZIPMarkdown snapshot manifest has an invalid document hash")
+    return manifest
+
+
+def read_snapshot_manifest(markdown_path: Path, *, limits: SecurityLimits = DEFAULT_LIMITS) -> dict[str, object] | None:
+    """Read the single export manifest outside fenced content, if present."""
+    manifest: dict[str, object] | None = None
+    in_fence: re.Pattern[str] | None = None
+    for line in _limited_markdown_lines(markdown_path, limits):
+        logical = line[:-1] if line.endswith("\r") else line
+        if in_fence is not None:
+            if in_fence.fullmatch(logical):
+                in_fence = None
+            continue
+        opening = FENCE_RE.fullmatch(logical)
+        if opening is not None:
+            fence = opening.group(1)
+            in_fence = re.compile(rf"^ {{0,3}}{re.escape(fence[0])}{{{len(fence)},}}[ \t]*$")
+            continue
+        parsed = _parse_manifest_line(logical)
+        if parsed is not None:
+            if manifest is not None:
+                raise ValueError("Markdown contains more than one ZIPMarkdown snapshot manifest")
+            manifest = parsed
+    return manifest
+
+
 def parse_markdown(
     markdown_path: Path, *, limits: SecurityLimits = DEFAULT_LIMITS
 ) -> list[tuple[str, str]]:
@@ -107,6 +153,7 @@ def parse_markdown(
     block_name: str | None = None
     block_lines: list[str] = []
     block_bytes = total_bytes = 0
+    manifest: dict[str, object] | None = None
     for line in _limited_markdown_lines(markdown_path, limits):
         logical_line = line[:-1] if line.endswith("\r") else line
         if closing_re is not None:
@@ -141,6 +188,11 @@ def parse_markdown(
             continue
         opening = FENCE_RE.fullmatch(logical_line)
         if opening is None:
+            parsed_manifest = _parse_manifest_line(logical_line)
+            if parsed_manifest is not None:
+                if manifest is not None:
+                    raise ValueError("Markdown contains more than one ZIPMarkdown snapshot manifest")
+                manifest = parsed_manifest
             labels.append(logical_line)
             labels = labels[-200:]
             continue
@@ -149,7 +201,14 @@ def parse_markdown(
         block_name = current_name or name_from_labels(labels)
         block_lines = []
         block_bytes = 0
-    if not files:
+    if closing_re is not None:
+        name = block_name or "unnamed block"
+        raise ValueError(f"truncated Markdown: unclosed fenced block for {name!r}")
+    if manifest is not None and manifest["entries"] != len(files):
+        raise ValueError(
+            f"ZIPMarkdown snapshot manifest declares {manifest['entries']} entries but {len(files)} were parsed"
+        )
+    if not files and not (manifest is not None and manifest["entries"] == 0):
         raise ValueError("no named fenced file blocks were found")
     files = recover_names_from_includes(files)
     seen: set[str] = set()

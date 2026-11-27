@@ -109,11 +109,16 @@ def _serialize(payload: dict[str, Any]) -> bytes:
     return json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("utf-8")
 
 
-def save_secrets(path: Path, payload: dict[str, Any], *, backend: VaultBackend | None = None) -> None:
-    """Atomically write a protected vault. The default backend is resolved lazily."""
+def serialize_secrets(payload: dict[str, Any], *, backend: VaultBackend | None = None) -> bytes:
+    """Return the complete protected vault representation without writing it."""
     selected = backend or default_backend()
     magic = TEST_MAGIC if isinstance(selected, TestVaultBackend) else MAGIC
-    atomic_write_bytes(Path(path), magic + selected.protect(_serialize(payload)), mode=0o600)
+    return magic + selected.protect(_serialize(payload))
+
+
+def save_secrets(path: Path, payload: dict[str, Any], *, backend: VaultBackend | None = None) -> None:
+    """Atomically write a protected vault. The default backend is resolved lazily."""
+    atomic_write_bytes(Path(path), serialize_secrets(payload, backend=backend), mode=0o600)
 
 
 def load_secrets(path: Path, *, backend: VaultBackend | None = None) -> dict[str, Any]:

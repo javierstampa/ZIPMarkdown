@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Security policy
-    url: ../../security/policy
-    about: Use private vulnerability reporting; do not disclose security issues publicly.
+  - name: Report a security vulnerability privately
+    url: https://github.com/javierstampa/ZIPMarkdown/security/advisories/new
+    about: Open a private security advisory; never disclose vulnerability details in a public issue.

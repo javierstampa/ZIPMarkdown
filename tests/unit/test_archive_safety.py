@@ -2,7 +2,13 @@ from __future__ import annotations
 import stat
 import zipfile
 import pytest
-from archive_safety import ArchiveSecurityError, SecurityLimits, validate_archive_name, validate_zip_infos
+from archive_safety import (
+    ArchiveSecurityError,
+    SecurityLimits,
+    canonical_archive_key,
+    validate_archive_name,
+    validate_zip_infos,
+)
 
 @pytest.mark.parametrize("name", [
     "../escape.txt", "../../escape.txt", "/absolute.txt", "C:/drive.txt", "C:\\drive.txt",
@@ -18,8 +24,16 @@ def test_portable_paths_are_accepted(name: str) -> None:
     assert validate_archive_name(name) == name
 
 def test_duplicate_entries_are_rejected() -> None:
-    with pytest.raises(ArchiveSecurityError, match="duplicate"):
+    with pytest.raises(ArchiveSecurityError, match="collision"):
         validate_zip_infos([zipfile.ZipInfo("a.txt"), zipfile.ZipInfo("A.txt")])
+
+
+def test_unicode_equivalent_entries_are_rejected() -> None:
+    composed = "docs/caf\u00e9.md"
+    decomposed = "docs/cafe\u0301.md"
+    assert canonical_archive_key(composed) == canonical_archive_key(decomposed)
+    with pytest.raises(ArchiveSecurityError, match="collision"):
+        validate_zip_infos([zipfile.ZipInfo(composed), zipfile.ZipInfo(decomposed)])
 
 def test_encrypted_entry_is_rejected() -> None:
     info = zipfile.ZipInfo("a.txt")

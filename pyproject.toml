@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zipmarkdown"
-version = "0.1.0b1"
+version = "0.1.0b2"
 description = "Secure, local project/ZIP to AI-friendly Markdown round trips"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.13"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Javier Stampa Garcia" }]
@@ -24,12 +24,14 @@ classifiers = [
 ]
 dependencies = [
   "pypdf>=5.1,<7",
-  "Pillow>=10.4,<13",
-  "pystray>=0.19.5,<1",
   "pathspec>=0.12.1,<1",
 ]
 
 [project.optional-dependencies]
+gui = [
+  "Pillow>=10.4,<13",
+  "pystray>=0.19.5,<1",
+]
 dev = [
   "build>=1.2.2,<2",
   "PyInstaller>=6.11,<7",
