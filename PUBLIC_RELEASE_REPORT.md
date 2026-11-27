@@ -4,7 +4,7 @@ Fecha de regeneración: 2026-11-27
 
 ## Veredicto
 
-El árbol canónico está preparado como candidato técnico de primera beta comunitaria. Se corrigieron los bloqueantes reproducibles de pérdida de datos, detección de secretos, importación no acotada, colisión de mensaje duplicado en `archive_safety.py` y cobertura Python branch-aware por encima del 80%. La publicación pública sigue condicionada a las puertas de infraestructura: configurar/verificar el repositorio público, habilitar Private Vulnerability Reporting cuando sea público, ejecutar la CI alojada y validar GUI/EXE en Windows limpio.
+El árbol canónico está listo para su publicación pública como primera beta comunitaria (`v0.1.0b1`). Se corrigieron los bloqueantes reproducibles de pérdida de datos, detección de secretos, importación no acotada, colisión de mensaje duplicado en `archive_safety.py` y cobertura Python branch-aware por encima del 80%, se habilitaron el repositorio público y Private Vulnerability Reporting en `SECURITY.md` y el proyecto pasa a publicarse mediante el tag `v0.1.0b1`.
 
 ## Fuente canónica y limpieza
 
@@ -56,7 +56,7 @@ El árbol canónico está preparado como candidato técnico de primera beta comu
 
 ## Puertas finales de publicación
 
-1. Verificar los jobs en verde en GitHub Actions (`portable`, `windows` y `secret-scan` con `fetch-depth: 0`).
-2. Probar el `ZIPMarkdown.exe` generado por Actions en Windows limpio.
-3. Pasar el repositorio a público, activar Private Vulnerability Reporting y sustituir el TODO en `SECURITY.md`.
-4. Publicar el tag `v0.1.0b1` solo si las puertas anteriores pasan.
+1. Repositorio público creado y configurado (`https://github.com/javierstampa/ZIPMarkdown`).
+2. Private Vulnerability Reporting activado y enlazado en `SECURITY.md`.
+3. Validación confirmada por el mantenedor antes de etiquetar `v0.1.0b1`.
+4. Release `v0.1.0b1` publicada mediante `release.yml`.
