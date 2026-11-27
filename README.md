@@ -2,7 +2,7 @@
 
 **Export a complete project to AI-friendly Markdown, redact secrets locally, let an AI modify the project, and conservatively restore protected values when rebuilding it.**
 
-> **Beta:** package version `0.1.0b1`; first public pre-release tag `v0.1.0-beta`.
+> **Beta:** package version `0.1.0b1`; first public pre-release tag `v0.1.0b1`. Keep a backup before using beta builds on critical projects.
 
 ZIPMarkdown is a local, no-telemetry round-trip tool. Unlike one-way “folder to prompt” converters, it keeps the recovery path in scope: filenames, text, PDFs, binaries, sensitive files, and protected values can be rebuilt after an AI edits the Markdown.
 
@@ -191,9 +191,9 @@ python -m ruff check .
 python -m build
 ```
 
-Linux CI runs portable logic with an injected test vault. Windows CI runs the same suite plus real DPAPI tests and builds the executable. The release workflow is prepared for `v0.1.0-beta`.
+Linux CI runs portable logic with an injected test vault. Windows CI runs the same suite plus real DPAPI tests and builds the executable. The release workflow triggers on `v*` tags (starting with `v0.1.0b1`).
 
-Public repository, issue, documentation, release-download, and private-security URLs are intentionally not invented. They must be added to `pyproject.toml` and `website/src/content/product.ts` when the real public repository exists.
+Repository and issue tracker: https://github.com/javierstampa/ZIPMarkdown (configured in `pyproject.toml`).
 
 ## Security model and limitations
 

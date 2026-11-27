@@ -2,7 +2,7 @@
 
 **Exporta un proyecto completo a Markdown apto para una IA, redacta secretos localmente, permite que una IA modifique el proyecto y restaura de forma conservadora los valores protegidos al reconstruirlo.**
 
-> **Beta:** versión del paquete `0.1.0b1`; primera etiqueta pública prevista: `v0.1.0-beta`.
+> **Beta:** versión del paquete `0.1.0b1`; primera etiqueta pública prevista: `v0.1.0b1`. Mantén una copia de seguridad antes de usar la beta en proyectos críticos.
 
 ZIPMarkdown cierra el ciclo completo sin telemetría:
 
@@ -144,9 +144,9 @@ python -m ruff check .
 python -m build
 ```
 
-CI prueba Python 3.10, 3.11 y 3.12 en Linux y Windows. Windows ejecuta pruebas DPAPI reales y construye el EXE. La publicación beta se prepara desde `v0.1.0-beta`.
+CI prueba Python 3.10, 3.11 y 3.12 en Linux y Windows. Windows ejecuta pruebas DPAPI reales y construye el EXE. El workflow de release se dispara con etiquetas `v*` (empezando por `v0.1.0b1`).
 
-Las URLs públicas de repositorio, incidencias, documentación, descargas y reporte privado no se inventan. Deben añadirse a `pyproject.toml` y `website/src/content/product.ts` cuando exista el repositorio público real.
+Repositorio e incidencias: https://github.com/javierstampa/ZIPMarkdown (configurado en `pyproject.toml`).
 
 ## Limitaciones y modelo de seguridad
 

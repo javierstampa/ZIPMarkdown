@@ -2,7 +2,7 @@ name: Beta release
 
 on:
   push:
-    tags: ['v0.1.0-beta']
+    tags: ['v*']
   workflow_dispatch:
 
 permissions:
@@ -25,21 +25,21 @@ jobs:
         run: build_exe.bat
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ZIPMarkdown-v0.1.0-beta-windows
+          name: ZIPMarkdown-${{ github.ref_name }}-windows
           path: |
             dist/ZIPMarkdown.exe
             dist/ZIPMarkdown.exe.sha256
-            dist/zipmarkdown-0.1.0b1-py3-none-any.whl
-            dist/zipmarkdown-0.1.0b1.tar.gz
+            dist/zipmarkdown-*.whl
+            dist/zipmarkdown-*.tar.gz
       - if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
         with:
-          prerelease: true
+          prerelease: ${{ contains(github.ref_name, 'a') || contains(github.ref_name, 'b') || contains(github.ref_name, 'rc') || contains(github.ref_name, '-') }}
           files: |
             dist/ZIPMarkdown.exe
             dist/ZIPMarkdown.exe.sha256
-            dist/zipmarkdown-0.1.0b1-py3-none-any.whl
-            dist/zipmarkdown-0.1.0b1.tar.gz
+            dist/zipmarkdown-*.whl
+            dist/zipmarkdown-*.tar.gz
           body: |
-            ZIPMarkdown v0.1.0 beta 1. Python package version: 0.1.0b1.
+            ZIPMarkdown ${{ github.ref_name }}.
             This executable is not Authenticode-signed. Windows SmartScreen may warn.

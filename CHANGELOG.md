@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The project uses semantic package versions; the first public tag is `v0.1.0-beta`.
+All notable changes follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The project uses semantic package versions; the first public tag is `v0.1.0b1`.
 
 ## [Unreleased]
 

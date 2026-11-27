@@ -32,11 +32,10 @@ El árbol canónico está preparado como candidato técnico de primera beta comu
 
 ## Empaquetado y comunicación
 
-- Versión Python PEP 440: `0.1.0b1`; etiqueta prevista: `v0.1.0-beta`.
-- Wheel y sdist regenerados con los nuevos módulos de seguridad incluidos.
-- Web y metadatos muestran `0.1.0b1`.
-- Las URLs públicas permanecen sin inventar por decisión expresa: no existe todavía un remoto ni repositorio público verificable. Deben añadirse a `pyproject.toml` y `website/src/content/product.ts` cuando se cree el destino real.
-- Informe y checksums se regeneraron desde este árbol.
+- Versión Python PEP 440: `0.1.0b1`; etiqueta prevista: `v0.1.0b1` (workflow `release.yml` con trigger `v*`).
+- Wheel y sdist verificados con los nuevos módulos de seguridad incluidos.
+- URLs reales (`https://github.com/javierstampa/ZIPMarkdown`) añadidas a `pyproject.toml`.
+- Informe regenerado desde este árbol.
 
 ## Validación ejecutada
 
@@ -45,20 +44,19 @@ El árbol canónico está preparado como candidato técnico de primera beta comu
 - `ruff check .`: superado sin errores.
 - Compilación de todos los módulos Python (`python -m compileall -q .`): correcta.
 - Wheel `zipmarkdown-0.1.0b1-py3-none-any.whl` y sdist `zipmarkdown-0.1.0b1.tar.gz`: construidas mediante `setuptools.build_meta` y verificadas (`path_safety.py` y `secret_scanner.py` incluidos).
-- Workflows: todas las referencias `uses:` verificadas como SHA de 40 caracteres; job web retirado del repo al mantenerse la web únicamente en local.
-- Lockfile: estructura y versiones fijadas verificadas.
+- Ejecutable local `dist\ZIPMarkdown.exe` (`42,422,371` bytes) y `dist\ZIPMarkdown.exe.sha256`: compilados localmente con PyInstaller; prueba manual en sesión gráfica/Windows limpio pendiente.
+- Workflows: todas las referencias `uses:` verificadas como SHA de 40 caracteres; job web retirado del repo al mantenerse la web únicamente en local; `release.yml` configurado con trigger `v*` y artefactos dinámicos.
 
 ## Limitaciones de esta ejecución
 
-- El entorno local sin conexión en el sandbox no dispone de `gitleaks` en `PATH`, por lo que ese escaneo queda pendiente de ejecutarse en GitHub Actions.
-- La puerta de Gitleaks queda configurada como fallo obligatorio de CI y debe ejecutarse en GitHub antes de publicar.
-- Siguen pendientes GUI/EXE, checksum del EXE y prueba en Windows limpio.
-- Al publicar el repositorio, falta habilitar/verificar Private Vulnerability Reporting.
+- El entorno local sin conexión en el sandbox no dispone de `gitleaks` en `PATH`, por lo que ese escaneo sobre todo el historial queda pendiente de ejecutarse en GitHub Actions.
+- La puerta de Gitleaks queda configurada como fallo obligatorio de CI y debe pasar en verde en GitHub antes de hacer público el repositorio.
+- Siguen pendientes el smoke test de GUI/EXE descargado desde Actions y la prueba en Windows limpio.
+- Al hacer público el repositorio, falta activar Private Vulnerability Reporting y actualizar el TODO de `SECURITY.md` con el enlace real.
 
 ## Puertas finales de publicación
 
-1. Verificar URLs del repositorio (`https://github.com/javierstampa/ZIPMarkdown`) y visibilidad pública cuando corresponda.
-2. Habilitar Private Vulnerability Reporting.
-3. Ejecutar CI alojada completa sin excepciones en Linux y Windows.
-4. Validar DPAPI, GUI y EXE en Windows limpio y publicar el checksum real del EXE.
-5. Publicar `v0.1.0-beta` solo si las cuatro puertas anteriores pasan.
+1. Verificar los jobs en verde en GitHub Actions (`portable`, `windows` y `secret-scan` con `fetch-depth: 0`).
+2. Probar el `ZIPMarkdown.exe` generado por Actions en Windows limpio.
+3. Pasar el repositorio a público, activar Private Vulnerability Reporting y sustituir el TODO en `SECURITY.md`.
+4. Publicar el tag `v0.1.0b1` solo si las puertas anteriores pasan.
