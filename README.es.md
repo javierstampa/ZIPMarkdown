@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/zipmarkdown-logo.png" alt="Logo de ZIPMarkdown" width="128" />
+  <img src="assets/zipmarkdown-logo.png" alt="ZIPMarkdown" width="640" />
 </p>
 
 # ZIPMarkdown
