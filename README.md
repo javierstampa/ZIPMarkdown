@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/zipmarkdown-logo.png" alt="ZIPMarkdown logo" width="128" />
+</p>
+
 # ZIPMarkdown
 
 **Export a complete project to AI-friendly Markdown, redact secrets locally, let an AI modify the project, and conservatively restore protected values when rebuilding it.**

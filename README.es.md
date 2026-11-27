@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/zipmarkdown-logo.png" alt="Logo de ZIPMarkdown" width="128" />
+</p>
+
 # ZIPMarkdown
 
 **Exporta un proyecto completo a Markdown apto para una IA, redacta secretos localmente, permite que una IA modifique el proyecto y restaura de forma conservadora los valores protegidos al reconstruirlo.**
