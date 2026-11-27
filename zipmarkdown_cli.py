@@ -10,7 +10,7 @@ import zip_a_markdown
 from archive_safety import DEFAULT_LIMITS, SecurityLimits
 from rebase_secrets import run_rebase
 
-__version__ = "0.1.0"
+__version__ = "0.1.0b1"
 
 
 def _limits(args: argparse.Namespace) -> SecurityLimits:
@@ -18,6 +18,7 @@ def _limits(args: argparse.Namespace) -> SecurityLimits:
         max_entries=args.max_entries,
         max_file_size=args.max_file_mb * 1024 * 1024,
         max_total_size=args.max_total_mb * 1024 * 1024,
+        max_markdown_size=args.max_markdown_mb * 1024 * 1024,
         max_pdf_pages=args.max_pdf_pages,
         max_compression_ratio=args.max_compression_ratio,
     )
@@ -27,6 +28,7 @@ def _add_limits(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--max-entries", type=int, default=DEFAULT_LIMITS.max_entries)
     parser.add_argument("--max-file-mb", type=int, default=100)
     parser.add_argument("--max-total-mb", type=int, default=1024)
+    parser.add_argument("--max-markdown-mb", type=int, default=1024)
     parser.add_argument("--max-pdf-pages", type=int, default=DEFAULT_LIMITS.max_pdf_pages)
     parser.add_argument("--max-compression-ratio", type=float, default=DEFAULT_LIMITS.max_compression_ratio)
 
@@ -42,6 +44,10 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--no-vault", action="store_true")
     export.add_argument("--respect-gitignore", action="store_true")
     export.add_argument("--verbose", action="store_true")
+    export.add_argument(
+        "--strict-secrets", action="store_true",
+        help="Stop on ambiguous findings and require a clean Gitleaks scan of the generated Markdown",
+    )
     _add_limits(export)
 
     rebuild = commands.add_parser("import", help="Rebuild a ZIP or project folder from Markdown")
@@ -74,9 +80,13 @@ def main(argv: list[str] | None = None) -> int:
                 zip_a_markdown.convert_folder_to_markdown(
                     args.source, output, no_vault=args.no_vault, limits=_limits(args),
                     respect_gitignore=args.respect_gitignore, verbose=args.verbose,
+                    strict_secrets=args.strict_secrets,
                 )
                 if args.source.is_dir() else
-                zip_a_markdown.convert(args.source, output, no_vault=args.no_vault, limits=_limits(args))
+                zip_a_markdown.convert(
+                    args.source, output, no_vault=args.no_vault, limits=_limits(args),
+                    strict_secrets=args.strict_secrets,
+                )
             )
             print(f"Created {output}; {report.included} text files; vault: {report.secrets_file or 'not required'}")
             for warning in report.warnings if args.verbose else ():

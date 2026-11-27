@@ -16,6 +16,8 @@ env/
 # Packaging and executable builds
 build/
 dist/
+releases/
+RELEASE_SHA256.txt
 *.egg-info/
 *.spec
 *.exe
@@ -40,6 +42,9 @@ dist/
 *.p12
 *.pfx
 *.jks
+
+# Local preview website (not tracked in repository)
+website/
 
 # Editors and OS artifacts
 .vscode/

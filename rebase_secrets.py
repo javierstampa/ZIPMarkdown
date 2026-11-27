@@ -8,6 +8,7 @@ from pathlib import Path
 
 from archive_safety import DEFAULT_LIMITS, SecurityLimits
 from local_secrets import secrets_path_for
+from path_safety import ensure_distinct_paths, require_suffix
 from secrets_rebase import RebaseReport, rebase_markdown_file, rebase_zip_file
 
 
@@ -20,6 +21,9 @@ def run_rebase(source: Path, vault: Path, output: Path | None = None, *, limits:
     if suffix not in {".md", ".zip"}:
         raise ValueError("input must be a .md or .zip file")
     destination = output or source.with_name(source.stem + "_rebased.zip")
+    require_suffix(destination, ".zip", "rebase output")
+    require_suffix(vault, ".secrets", "vault")
+    ensure_distinct_paths(input=source, output=destination, vault=vault)
     report = (
         rebase_markdown_file(source, destination, vault, limits=limits)
         if suffix == ".md" else rebase_zip_file(source, destination, vault, limits=limits)

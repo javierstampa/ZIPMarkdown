@@ -10,10 +10,17 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-from archive_safety import DEFAULT_LIMITS, SecurityLimits, validate_archive_name as _validate_archive_name, validate_zip_infos
+from archive_safety import (
+    DEFAULT_LIMITS,
+    SecurityLimits,
+    canonical_archive_key,
+    validate_archive_name as _validate_archive_name,
+    validate_zip_infos,
+)
 from atomic_utils import atomic_build
 from filename_recovery import recover_names_from_includes
 from local_secrets import VaultBackend, secrets_path_for
+from path_safety import ensure_distinct_paths, require_suffix
 
 DUPLICATE_RE = re.compile(r" \(entrada repetida #\d+\)$", re.I)
 HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$")
@@ -66,44 +73,91 @@ def name_from_labels(lines: list[str]) -> str | None:
     return None
 
 
-def parse_markdown(markdown_path: Path) -> list[tuple[str, str]]:
-    with markdown_path.open("r", encoding="utf-8", newline="") as stream:
-        lines = stream.read().split("\n")
+def _limited_markdown_lines(markdown_path: Path, limits: SecurityLimits):
+    size = markdown_path.stat().st_size
+    if size > limits.max_markdown_size:
+        raise ValueError(
+            f"Markdown is {size} bytes; input limit is {limits.max_markdown_size} bytes"
+        )
+    total = 0
+    with markdown_path.open("rb") as stream:
+        while True:
+            raw = stream.readline(limits.max_file_size + 2)
+            if not raw:
+                break
+            total += len(raw)
+            if total > limits.max_markdown_size:
+                raise ValueError("Markdown changed or exceeded its configured input-size limit while reading")
+            if len(raw) > limits.max_file_size + 1 and not raw.endswith(b"\n"):
+                raise ValueError("Markdown contains a line larger than the per-file limit")
+            try:
+                decoded = raw.decode("utf-8")
+                yield decoded[:-1] if decoded.endswith("\n") else decoded
+            except UnicodeDecodeError as error:
+                raise ValueError("Markdown must be valid UTF-8") from error
+
+
+def parse_markdown(
+    markdown_path: Path, *, limits: SecurityLimits = DEFAULT_LIMITS
+) -> list[tuple[str, str]]:
     files: list[tuple[str, str]] = []
     current_name: str | None = None
-    section_start = position = 0
-    while position < len(lines):
-        heading = HEADING_RE.fullmatch(lines[position])
+    labels: list[str] = []
+    closing_re: re.Pattern[str] | None = None
+    block_name: str | None = None
+    block_lines: list[str] = []
+    block_bytes = total_bytes = 0
+    for line in _limited_markdown_lines(markdown_path, limits):
+        logical_line = line[:-1] if line.endswith("\r") else line
+        if closing_re is not None:
+            if closing_re.fullmatch(logical_line):
+                if block_name:
+                    content = "\n".join(block_lines)
+                    files.append((DUPLICATE_RE.sub("", block_name), content))
+                    if len(files) > limits.max_entries:
+                        raise ValueError(
+                            f"Markdown has more than {limits.max_entries} file blocks"
+                        )
+                    total_bytes += len(content.encode("utf-8"))
+                    if total_bytes > limits.max_total_size:
+                        raise ValueError("Markdown output exceeds the configured total-size limit")
+                current_name = block_name = None
+                block_lines = []
+                block_bytes = 0
+                closing_re = None
+                labels = []
+                continue
+            block_bytes += len(line.encode("utf-8")) + (1 if block_lines else 0)
+            if block_bytes > limits.max_file_size:
+                raise ValueError("Markdown file block exceeds the configured per-file limit")
+            block_lines.append(line)
+            continue
+
+        heading = HEADING_RE.fullmatch(logical_line)
         if heading:
             current_name = name_from_heading(heading.group(1))
-            position += 1
+            labels.append(logical_line)
+            labels = labels[-200:]
             continue
-        opening = FENCE_RE.fullmatch(lines[position])
+        opening = FENCE_RE.fullmatch(logical_line)
         if opening is None:
-            position += 1
+            labels.append(logical_line)
+            labels = labels[-200:]
             continue
-        fence, closing = opening.group(1), position + 1
+        fence = opening.group(1)
         closing_re = re.compile(rf"^ {{0,3}}{re.escape(fence[0])}{{{len(fence)},}}[ \t]*$")
-        while closing < len(lines) and not closing_re.fullmatch(lines[closing]):
-            closing += 1
-        if closing == len(lines):
-            position += 1
-            continue
-        content = "\n".join(lines[position + 1:closing])
-        name = current_name or name_from_labels(lines[section_start:position])
-        if name:
-            files.append((DUPLICATE_RE.sub("", name), content))
-        current_name = None
-        section_start = position = closing + 1
+        block_name = current_name or name_from_labels(labels)
+        block_lines = []
+        block_bytes = 0
     if not files:
         raise ValueError("no named fenced file blocks were found")
     files = recover_names_from_includes(files)
     seen: set[str] = set()
     for name, _ in files:
         validate_archive_name(name)
-        folded = name.casefold()
+        folded = canonical_archive_key(name)
         if folded in seen:
-            raise ValueError(f"duplicate Markdown file path: {name!r}")
+            raise ValueError(f"canonical path collision in Markdown: {name!r}")
         seen.add(folded)
     return files
 
@@ -130,12 +184,17 @@ def convert(
     limits: SecurityLimits = DEFAULT_LIMITS,
 ) -> int:
     selected = secrets_path or secrets_path_for(markdown_path)
+    require_suffix(markdown_path, ".md", "Markdown input")
+    require_suffix(output_path, ".zip", "rebuild output")
+    if secrets_path is not None:
+        require_suffix(selected, ".secrets", "vault")
+    ensure_distinct_paths(input=markdown_path, output=output_path, vault=selected)
     if not no_vault and selected.is_file():
         from secrets_rebase import rebase_markdown_file
         return rebase_markdown_file(
             markdown_path, output_path, selected, vault_backend=vault_backend, limits=limits
         ).files_generated
-    files = parse_markdown(markdown_path)
+    files = parse_markdown(markdown_path, limits=limits)
     if len(files) > limits.max_entries:
         raise ValueError(f"Markdown has {len(files)} files; limit is {limits.max_entries}")
     total = sum(len(content.encode("utf-8")) for _, content in files)
@@ -162,6 +221,13 @@ def convert_to_folder(
     no_vault: bool = False,
     limits: SecurityLimits = DEFAULT_LIMITS,
 ) -> int:
+    require_suffix(markdown_path, ".md", "Markdown input")
+    if output_directory.suffix.casefold() == ".secrets":
+        raise ValueError("project directory cannot use the reserved .secrets suffix")
+    selected = secrets_path or secrets_path_for(markdown_path)
+    if secrets_path is not None:
+        require_suffix(selected, ".secrets", "vault")
+    ensure_distinct_paths(input=markdown_path, output=output_directory, vault=selected)
     if output_directory.exists():
         raise FileExistsError(f"destination directory already exists: {output_directory}")
     output_directory.parent.mkdir(parents=True, exist_ok=True)

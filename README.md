@@ -2,7 +2,7 @@
 
 **Export a complete project to AI-friendly Markdown, redact secrets locally, let an AI modify the project, and conservatively restore protected values when rebuilding it.**
 
-> **Beta:** package version `0.1.0`; first public pre-release tag `v0.1.0-beta`.
+> **Beta:** package version `0.1.0b1`; first public pre-release tag `v0.1.0-beta`.
 
 ZIPMarkdown is a local, no-telemetry round-trip tool. Unlike one-way “folder to prompt” converters, it keeps the recovery path in scope: filenames, text, PDFs, binaries, sensitive files, and protected values can be rebuilt after an AI edits the Markdown.
 
@@ -60,6 +60,7 @@ python -m pip install -e ".[dev]"
 zipmarkdown export ./my-project -o project.md
 zipmarkdown export project.zip -o project.md
 zipmarkdown export ./my-project -o project.md --respect-gitignore --verbose
+zipmarkdown export ./my-project -o project.md --strict-secrets
 ```
 
 The legacy commands remain available:
@@ -72,6 +73,8 @@ python zip_a_markdown.py project.zip -o project.md
 ### Let an AI edit the Markdown
 
 Share only the `.md`. **Never share or commit the adjacent `.secrets` file.** Review the Markdown before sharing it; filtering reduces risk but does not guarantee detection of every secret.
+
+`--strict-secrets` additionally stops on ambiguous credential-like assignments and requires the locally installed `gitleaks` executable to report a clean scan of the generated Markdown before either the Markdown or vault is written.
 
 ### Rebuild
 
@@ -142,6 +145,7 @@ Defaults are centralized in `archive_safety.py` and exposed by CLI flags:
 - 10,000 entries;
 - 100 MB uncompressed per file;
 - 1 GB total uncompressed;
+- 1 GB maximum Markdown input checked before parsing;
 - 1,000 PDF pages;
 - compression ratio above 100:1 rejected;
 - portable path-length and depth checks.
@@ -182,12 +186,14 @@ Outputs are `dist\ZIPMarkdown.exe` and `dist\ZIPMarkdown.exe.sha256`. The execut
 
 ```bash
 python -m compileall -q .
-python -m pytest
+python -m pytest --cov --cov-fail-under=80
 python -m ruff check .
 python -m build
 ```
 
 Linux CI runs portable logic with an injected test vault. Windows CI runs the same suite plus real DPAPI tests and builds the executable. The release workflow is prepared for `v0.1.0-beta`.
+
+Public repository, issue, documentation, release-download, and private-security URLs are intentionally not invented. They must be added to `pyproject.toml` and `website/src/content/product.ts` when the real public repository exists.
 
 ## Security model and limitations
 

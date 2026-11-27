@@ -19,6 +19,7 @@ def test_functional_values_are_not_redacted(line: str) -> None:
     'client_secret: TEST_ONLY_client_secret_12345',
     'access_token = "TEST_ONLY_access_token_12345"',
     'database_password = "TEST_ONLY_database_password_12345"',
+    'password = "TEST_ONLY_password_12345"',
 ])
 def test_high_confidence_names_redact(line: str) -> None:
     report = FilterReport()
@@ -30,7 +31,6 @@ def test_high_confidence_names_redact(line: str) -> None:
 
 @pytest.mark.parametrize("line", [
     'token = "TEST_ONLY_contextual_token_12345"',
-    'password: TEST_ONLY_contextual_password_12345',
     'key = "TEST_ONLY_contextual_key_12345"',
 ])
 def test_generic_names_require_credential_like_values(line: str) -> None:
@@ -91,3 +91,27 @@ def test_real_bearer_and_basic_tokens_redact() -> None:
     assert count == 2
     assert "dXNlcjpwYXNzd29yZA==" not in redacted
     assert "eyJhbGciOiJIUzI1NiJ9" not in redacted
+
+
+@pytest.mark.parametrize("snippet, leaked", [
+    ('password = "Winter26!"', "Winter26!"),
+    ("Authorization: Bearer abcdefghijklmnopqrstuvwxyz", "abcdefghijklmnopqrstuvwxyz"),
+])
+def test_audit_regression_literals_are_redacted(snippet: str, leaked: str) -> None:
+    redacted, count = redact_secret_values(snippet, secret_values={}, source_path="config.txt")
+    assert count == 1
+    assert leaked not in redacted
+
+
+def test_ambiguous_url_and_triple_quoted_secrets() -> None:
+    report = FilterReport()
+    ambiguous_line = 'token = "abc"'
+    redacted, count = redact_secret_values(ambiguous_line, secret_values={}, source_path="cfg.py", report=report)
+    assert redacted == ambiguous_line and count == 0
+    assert any("Ambiguous" in w for w in report.warnings)
+
+    multi = 'api_key = """TEST_ONLY_multiline_secret_value"""\nurl = https://user:TEST_ONLY_url_pass@example.com/db\n'
+    redacted_multi, count_multi = redact_secret_values(multi, secret_values={}, source_path="cfg.py", report=report)
+    assert count_multi == 2
+    assert "TEST_ONLY_multiline_secret_value" not in redacted_multi
+    assert "TEST_ONLY_url_pass" not in redacted_multi

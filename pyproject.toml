@@ -1,19 +1,19 @@
 [build-system]
-requires = ["setuptools>=75,<82", "wheel>=0.44,<1"]
+requires = ["setuptools>=77,<82", "wheel>=0.44,<1"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "zipmarkdown"
-version = "0.1.0"
+version = "0.1.0b1"
 description = "Secure, local project/ZIP to AI-friendly Markdown round trips"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Javier Stampa Garcia" }]
 keywords = ["markdown", "zip", "ai", "secrets", "dpapi"]
 classifiers = [
   "Development Status :: 4 - Beta",
-  "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
@@ -42,11 +42,16 @@ dev = [
 zipmarkdown = "zipmarkdown_cli:main"
 zipmarkdown-gui = "zip_markdown_app:main"
 
+[project.urls]
+Homepage = "https://github.com/javierstampa/ZIPMarkdown"
+Repository = "https://github.com/javierstampa/ZIPMarkdown"
+Issues = "https://github.com/javierstampa/ZIPMarkdown/issues"
+
 [tool.setuptools]
 py-modules = [
   "archive_safety", "atomic_utils", "filename_recovery", "gitignore_support",
   "local_secrets", "markdown_a_zip", "pdf_extractor", "rebase_secrets",
-  "secret_filter", "secrets_rebase", "zip_a_markdown", "zip_markdown_app",
+  "path_safety", "secret_filter", "secret_scanner", "secrets_rebase", "zip_a_markdown", "zip_markdown_app",
   "zipmarkdown_cli",
 ]
 
@@ -65,3 +70,16 @@ exclude = ["build", "dist"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "W"]
+
+[tool.coverage.run]
+branch = true
+source = [
+  "archive_safety", "atomic_utils", "filename_recovery", "gitignore_support",
+  "local_secrets", "markdown_a_zip", "path_safety", "pdf_extractor",
+  "rebase_secrets", "secret_filter", "secret_scanner", "secrets_rebase",
+  "zip_a_markdown", "zipmarkdown_cli",
+]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true

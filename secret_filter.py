@@ -34,9 +34,9 @@ HIGH_CONFIDENCE_KEYS = {
     "api_key", "apikey", "private_key", "privatekey", "client_secret", "clientsecret",
     "access_token", "accesstoken", "refresh_token", "refreshtoken", "database_password",
     "db_password", "authorization_header", "connection_string", "subscription_key",
-    "aws_secret_access_key", "secret_access_key",
+    "aws_secret_access_key", "secret_access_key", "password", "passwd",
 }
-GENERIC_KEYS = {"key", "auth", "authorization", "token", "secret", "password", "passwd"}
+GENERIC_KEYS = {"key", "auth", "authorization", "token", "secret"}
 TRIVIAL_VALUES = {"", "none", "null", "true", "false", "0", "1", "oauth2", "bearer", "asc", "desc", "id", "undefined", "nil"}
 KNOWN_PREFIXES = ("sk-", "rk-", "github_pat_", "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "AKIA", "AIza", "xoxb-", "xoxa-", "xoxp-", "xoxr-", "xoxs-")
 
@@ -49,6 +49,10 @@ _TRIPLE_QUOTED_RE = re.compile(
     r"(?P<quote>\"\"\"|''')(?P<value>.*?)(?P=quote)"
 )
 _BEARER_RE = re.compile(r"(?i)\b(Bearer|Basic)[ \t]+([A-Za-z0-9._~+/=-]{8,})")
+_AUTH_HEADER_RE = re.compile(
+    r"(?im)(?P<prefix>^[ \t]*Authorization[ \t]*:[ \t]*(?:Bearer|Basic)[ \t]+)"
+    r"(?P<token>[A-Za-z0-9._~+/=-]{8,})"
+)
 _URL_PASSWORD_RE = re.compile(r"(?i)(://[^:/\s]+:)([^@/\s]+)(@)")
 _PROVIDER_RES = (
     re.compile(r"\b(?:sk|rk)-(?:live|test)-[A-Za-z0-9]{12,}\b"),
@@ -207,6 +211,15 @@ def redact_secret_values(
         return f"{match.group('prefix')}{quote}{marker}{quote}"
 
     content = _ASSIGNMENT_RE.sub(replace_assignment, content)
+
+    def replace_auth_header(match: re.Match[str]) -> str:
+        token = match.group("token")
+        if _is_nonliteral_or_safe(token):
+            return match.group(0)
+        note("high")
+        return f"{match.group('prefix')}{placeholder(token, kind='authorization')}"
+
+    content = _AUTH_HEADER_RE.sub(replace_auth_header, content)
 
     def replace_auth(match: re.Match[str]) -> str:
         token = match.group(2)

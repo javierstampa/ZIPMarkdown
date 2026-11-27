@@ -11,8 +11,14 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from archive_safety import (
-    DEFAULT_LIMITS, ArchiveSecurityError, SecurityLimits, read_zip_entry,
-    validate_archive_name, validate_project_file, validate_zip_infos,
+    DEFAULT_LIMITS,
+    ArchiveSecurityError,
+    SecurityLimits,
+    canonical_archive_key,
+    read_zip_entry,
+    validate_archive_name,
+    validate_project_file,
+    validate_zip_infos,
 )
 from atomic_utils import atomic_write_text
 from filename_recovery import recover_names_from_includes
@@ -21,6 +27,7 @@ from local_secrets import (
     VaultBackend, VaultUnavailableError, payload_requires_vault, save_secrets, secrets_path_for,
 )
 from pdf_extractor import extract_pdf_text
+from path_safety import ensure_distinct_paths, require_suffix
 from secret_filter import FilterReport, is_generated_or_dependency_path, is_sensitive_path, redact_secret_values
 
 LANGUAGES = {
@@ -237,7 +244,13 @@ def _folder_entries(
             entries.append((relative, path))
     if len(entries) > limits.max_entries:
         raise ArchiveSecurityError(f"project has {len(entries)} files; limit is {limits.max_entries}")
-    yield from sorted(entries, key=lambda item: (item[0].casefold(), item[0]))
+    seen: set[str] = set()
+    for relative, _ in entries:
+        key = canonical_archive_key(relative)
+        if key in seen:
+            raise ArchiveSecurityError(f"canonical path collision in project: {relative!r}")
+        seen.add(key)
+    yield from sorted(entries, key=lambda item: (canonical_archive_key(item[0]), item[0]))
 
 
 def read_folder_text_files(
@@ -276,7 +289,11 @@ def convert(
     vault_backend: VaultBackend | None = None,
     no_vault: bool = False,
     limits: SecurityLimits = DEFAULT_LIMITS,
+    strict_secrets: bool = False,
 ) -> ConversionReport:
+    require_suffix(zip_path, ".zip", "input")
+    require_suffix(output_path, ".md", "export output")
+    ensure_distinct_paths(input=zip_path, output=output_path, vault=secrets_path_for(output_path))
     protection, capture = ProtectionStats(), SecretCapture.create()
     files, skipped_binary = read_zip_text_files(
         zip_path, protection_stats=protection, secret_capture=capture, limits=limits,
@@ -284,6 +301,7 @@ def convert(
     return write_markdown(
         zip_path.name, files, skipped_binary, output_path, protection_stats=protection,
         secret_capture=capture, vault_backend=vault_backend, no_vault=no_vault,
+        strict_secrets=strict_secrets,
     )
 
 
@@ -297,9 +315,12 @@ def convert_folder_to_markdown(
     limits: SecurityLimits = DEFAULT_LIMITS,
     respect_gitignore: bool = False,
     verbose: bool = False,
+    strict_secrets: bool = False,
 ) -> ConversionReport:
     if not folder_path.is_dir():
         raise NotADirectoryError(f"folder does not exist: {folder_path}")
+    require_suffix(output_path, ".md", "export output")
+    ensure_distinct_paths(input=folder_path, output=output_path, vault=secrets_path_for(output_path))
     protection, capture = ProtectionStats(), SecretCapture.create()
     excluded = set(exclude_paths or ()) | {output_path, secrets_path_for(output_path)}
     files, skipped_binary = read_folder_text_files(
@@ -309,6 +330,7 @@ def convert_folder_to_markdown(
     return write_markdown(
         folder_path.name, files, skipped_binary, output_path, protection_stats=protection,
         secret_capture=capture, vault_backend=vault_backend, no_vault=no_vault,
+        strict_secrets=strict_secrets,
     )
 
 
@@ -346,23 +368,34 @@ def write_markdown(
     secret_capture: SecretCapture | None = None,
     vault_backend: VaultBackend | None = None,
     no_vault: bool = False,
+    strict_secrets: bool = False,
 ) -> ConversionReport:
     protection = protection_stats or ProtectionStats()
     capture = secret_capture or SecretCapture.create()
     payload = capture.payload()
     sidecar = secrets_path_for(output_path)
+    require_suffix(output_path, ".md", "export output")
+    ensure_distinct_paths(output=output_path, vault=sidecar)
     requires_vault = payload_requires_vault(payload)
     if no_vault and requires_vault:
         raise VaultUnavailableError(
             "--no-vault cannot export this project because it requires protected recovery data for secrets, PDFs, sensitive files, or binaries"
         )
+    document = _markdown_document(title, files, skipped_binary, protection)
+    if strict_secrets:
+        if protection.filtering.warnings:
+            raise ValueError(
+                "strict secret mode rejected ambiguous credential-like assignments; review the source"
+            )
+        from secret_scanner import scan_markdown_with_gitleaks
+        scan_markdown_with_gitleaks(document)
     selected_sidecar: Path | None = None
     if requires_vault:
         save_secrets(sidecar, payload, backend=vault_backend)
         selected_sidecar = sidecar
     elif sidecar.exists():
         sidecar.unlink()
-    atomic_write_text(output_path, _markdown_document(title, files, skipped_binary, protection))
+    atomic_write_text(output_path, document)
     warnings = tuple(protection.filtering.warnings + protection.warnings)
     return ConversionReport(
         len(files), skipped_binary, protection.sensitive_files_skipped,
@@ -378,6 +411,7 @@ def _limits_from_args(args: argparse.Namespace) -> SecurityLimits:
         max_entries=args.max_entries,
         max_file_size=args.max_file_mb * 1024 * 1024,
         max_total_size=args.max_total_mb * 1024 * 1024,
+        max_markdown_size=args.max_markdown_mb * 1024 * 1024,
         max_pdf_pages=args.max_pdf_pages,
         max_compression_ratio=args.max_compression_ratio,
     )
@@ -393,8 +427,13 @@ def main() -> int:
     parser.add_argument("--max-entries", type=int, default=DEFAULT_LIMITS.max_entries)
     parser.add_argument("--max-file-mb", type=int, default=100)
     parser.add_argument("--max-total-mb", type=int, default=1024)
+    parser.add_argument("--max-markdown-mb", type=int, default=1024)
     parser.add_argument("--max-pdf-pages", type=int, default=DEFAULT_LIMITS.max_pdf_pages)
     parser.add_argument("--max-compression-ratio", type=float, default=DEFAULT_LIMITS.max_compression_ratio)
+    parser.add_argument(
+        "--strict-secrets", action="store_true",
+        help="Stop on ambiguous findings and require a clean Gitleaks content scan",
+    )
     args = parser.parse_args()
     source = args.input
     if not source.exists() or not (source.is_file() or source.is_dir()):
@@ -407,8 +446,15 @@ def main() -> int:
     try:
         limits = _limits_from_args(args)
         report = (
-            convert_folder_to_markdown(source, output, no_vault=args.no_vault, limits=limits, respect_gitignore=args.respect_gitignore, verbose=args.verbose)
-            if source.is_dir() else convert(source, output, no_vault=args.no_vault, limits=limits)
+            convert_folder_to_markdown(
+                source, output, no_vault=args.no_vault, limits=limits,
+                respect_gitignore=args.respect_gitignore, verbose=args.verbose,
+                strict_secrets=args.strict_secrets,
+            )
+            if source.is_dir() else convert(
+                source, output, no_vault=args.no_vault, limits=limits,
+                strict_secrets=args.strict_secrets,
+            )
         )
     except (OSError, ValueError, zipfile.BadZipFile, RuntimeError) as error:
         parser.error(f"export failed: {error}")

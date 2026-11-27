@@ -9,9 +9,17 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from archive_safety import DEFAULT_LIMITS, SecurityLimits, read_zip_entry, validate_archive_name, validate_zip_infos
+from archive_safety import (
+    DEFAULT_LIMITS,
+    SecurityLimits,
+    canonical_archive_key,
+    read_zip_entry,
+    validate_archive_name,
+    validate_zip_infos,
+)
 from atomic_utils import atomic_build
 from local_secrets import VaultBackend, load_secrets
+from path_safety import ensure_distinct_paths, require_suffix
 
 TOKEN_RE = re.compile(r"\[\[MDTK_SECRET_([a-f0-9]{32})\]\]")
 _PLACEHOLDER_VALUE_RE = re.compile(
@@ -44,7 +52,7 @@ class RebaseReport:
 
 
 def _path_key(path: str) -> str:
-    return path.replace("\\", "/").casefold()
+    return canonical_archive_key(path.replace("\\", "/"))
 
 
 def _basename_key(path: str) -> str:
@@ -244,8 +252,10 @@ def rebase_zip_file(
     limits: SecurityLimits = DEFAULT_LIMITS,
 ) -> RebaseReport:
     from zip_a_markdown import decode_text
-    if input_path.resolve() == output_path.resolve():
-        raise ValueError("output ZIP must differ from input ZIP")
+    require_suffix(input_path, ".zip", "rebase input")
+    require_suffix(output_path, ".zip", "rebase output")
+    require_suffix(secrets_path, ".secrets", "vault")
+    ensure_distinct_paths(input=input_path, output=output_path, vault=secrets_path)
     payload = load_secrets(secrets_path, backend=vault_backend)
     with zipfile.ZipFile(input_path) as source:
         infos = source.infolist()
@@ -297,10 +307,12 @@ def rebase_markdown_file(
     limits: SecurityLimits = DEFAULT_LIMITS,
 ) -> RebaseReport:
     import markdown_a_zip
-    if markdown_path.resolve() == output_path.resolve():
-        raise ValueError("output ZIP cannot overwrite its Markdown input")
+    require_suffix(markdown_path, ".md", "Markdown input")
+    require_suffix(output_path, ".zip", "rebase output")
+    require_suffix(secrets_path, ".secrets", "vault")
+    ensure_distinct_paths(input=markdown_path, output=output_path, vault=secrets_path)
     payload = load_secrets(secrets_path, backend=vault_backend)
-    files = markdown_a_zip.parse_markdown(markdown_path)
+    files = markdown_a_zip.parse_markdown(markdown_path, limits=limits)
     rebased, report = rebase_text_files(files, payload)
     for name, _ in rebased:
         validate_archive_name(name, limits=limits)

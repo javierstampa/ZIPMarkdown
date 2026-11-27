@@ -2,7 +2,7 @@
 
 **Exporta un proyecto completo a Markdown apto para una IA, redacta secretos localmente, permite que una IA modifique el proyecto y restaura de forma conservadora los valores protegidos al reconstruirlo.**
 
-> **Beta:** versión del paquete `0.1.0`; primera etiqueta pública prevista: `v0.1.0-beta`.
+> **Beta:** versión del paquete `0.1.0b1`; primera etiqueta pública prevista: `v0.1.0-beta`.
 
 ZIPMarkdown cierra el ciclo completo sin telemetría:
 
@@ -39,9 +39,12 @@ python -m pip install -e ".[dev]"
 zipmarkdown export ./mi-proyecto -o proyecto.md
 zipmarkdown export proyecto.zip -o proyecto.md
 zipmarkdown export ./mi-proyecto -o proyecto.md --respect-gitignore --verbose
+zipmarkdown export ./mi-proyecto -o proyecto.md --strict-secrets
 ```
 
 Entrega a la IA solo el `.md`; **no compartas ni versiones el `.secrets`**. Revisa siempre el Markdown: el filtrado reduce el riesgo, pero no garantiza detectar todos los secretos.
+
+`--strict-secrets` detiene además la exportación ante asignaciones ambiguas y exige que el ejecutable local `gitleaks` confirme que el Markdown generado está limpio antes de escribir el Markdown o el vault.
 
 Reconstrucción:
 
@@ -106,6 +109,7 @@ Valores predeterminados:
 - 10.000 entradas;
 - 100 MB por archivo descomprimido;
 - 1 GB total descomprimido;
+- 1 GB máximo de entrada Markdown, comprobado antes del análisis;
 - 1.000 páginas PDF;
 - rechazo de relaciones de compresión superiores a 100:1.
 
@@ -135,12 +139,14 @@ Genera `dist\ZIPMarkdown.exe` y su SHA-256. El ejecutable **no está firmado con
 
 ```bash
 python -m compileall -q .
-python -m pytest
+python -m pytest --cov --cov-fail-under=80
 python -m ruff check .
 python -m build
 ```
 
 CI prueba Python 3.10, 3.11 y 3.12 en Linux y Windows. Windows ejecuta pruebas DPAPI reales y construye el EXE. La publicación beta se prepara desde `v0.1.0-beta`.
+
+Las URLs públicas de repositorio, incidencias, documentación, descargas y reporte privado no se inventan. Deben añadirse a `pyproject.toml` y `website/src/content/product.ts` cuando exista el repositorio público real.
 
 ## Limitaciones y modelo de seguridad
 

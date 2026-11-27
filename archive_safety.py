@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import stat
+import unicodedata
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -16,6 +17,7 @@ class SecurityLimits:
     max_entries: int = 10_000
     max_file_size: int = 100 * 1024 * 1024
     max_total_size: int = 1024 * 1024 * 1024
+    max_markdown_size: int = 1024 * 1024 * 1024
     max_pdf_pages: int = 1_000
     max_compression_ratio: float = 100.0
     max_path_length: int = 240
@@ -24,6 +26,15 @@ class SecurityLimits:
 
 DEFAULT_LIMITS = SecurityLimits()
 WINDOWS_RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+
+
+def canonical_archive_key(name: str) -> str:
+    """Return a cross-platform collision key for an already validated path.
+
+    Case-insensitive filesystems and filesystems that normalize Unicode must not
+    be allowed to turn two archive entries into one destination file.
+    """
+    return "/".join(unicodedata.normalize("NFC", part).casefold() for part in PurePosixPath(name).parts)
 
 
 def validate_archive_name(name: str, *, limits: SecurityLimits = DEFAULT_LIMITS) -> str:
@@ -66,9 +77,9 @@ def validate_zip_infos(infos: list[zipfile.ZipInfo], *, limits: SecurityLimits =
         name = info.filename.rstrip("/") if info.is_dir() else info.filename
         if name:
             validate_archive_name(name, limits=limits)
-        folded = info.filename.casefold()
+        folded = canonical_archive_key(name)
         if folded in seen:
-            raise ArchiveSecurityError(f"duplicate ZIP entry: {info.filename!r}")
+            raise ArchiveSecurityError(f"duplicate or canonical path collision in ZIP: {info.filename!r}")
         seen.add(folded)
         if info.flag_bits & 0x1:
             raise ArchiveSecurityError(f"encrypted ZIP entries are not supported: {info.filename!r}")
