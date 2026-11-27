@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=77,<82", "wheel>=0.44,<1"]
+requires = ["setuptools>=77,<85", "wheel>=0.44,<1"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -23,8 +23,8 @@ classifiers = [
   "Operating System :: MacOS",
 ]
 dependencies = [
-  "pypdf>=5.1,<7",
-  "pathspec>=0.12.1,<1",
+  "pypdf>=5.1,<8",
+  "pathspec>=0.12.1,<2",
 ]
 
 [project.optional-dependencies]
@@ -35,7 +35,7 @@ gui = [
 dev = [
   "build>=1.2.2,<2",
   "PyInstaller>=6.11,<7",
-  "pytest>=8.3,<9",
+  "pytest>=8.3,<10",
   "pytest-cov>=6,<8",
   "ruff>=0.8,<1",
 ]
